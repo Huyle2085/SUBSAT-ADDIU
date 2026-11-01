@@ -1,0 +1,19 @@
+=================================================================
+ BAT DAU UNIT TEST: tb_control
+=================================================================
+[PASS] SUBSAT_NoOv      | inst=4273028b pos_ov=0 neg_ov=0 -> is_subsat=1 WBSel=1 regW=1 illegal=0
+[PASS] SUBSAT_PosOv     | inst=4273028b pos_ov=1 neg_ov=0 -> is_subsat=1 WBSel=3 regW=1 illegal=0
+[PASS] SUBSAT_NegOv     | inst=4273028b pos_ov=0 neg_ov=1 -> is_subsat=1 WBSel=4 regW=1 illegal=0
+[PASS] SUB_Std_NoOv     | inst=407302b3 pos_ov=0 neg_ov=0 -> is_subsat=0 WBSel=1 regW=1 illegal=0
+[PASS] SUB_Std_PosOv    | inst=407302b3 pos_ov=1 neg_ov=0 -> is_subsat=0 WBSel=1 regW=1 illegal=0
+[PASS] SUB_Std_NegOv    | inst=407302b3 pos_ov=0 neg_ov=1 -> is_subsat=0 WBSel=1 regW=1 illegal=0
+[PASS] ADD_Std          | inst=007302b3 pos_ov=0 neg_ov=0 -> is_subsat=0 WBSel=1 regW=1 illegal=0
+[PASS] LW_Std           | inst=0040a103 pos_ov=0 neg_ov=0 -> is_subsat=0 WBSel=0 regW=1 illegal=0
+[PASS] JAL_Std          | inst=000080ef pos_ov=0 neg_ov=0 -> is_subsat=0 WBSel=2 regW=1 illegal=0
+[PASS] BAD_Custom0_F3   | inst=4273128b pos_ov=1 neg_ov=0 -> is_subsat=0 WBSel=1 regW=0 illegal=1
+[PASS] BAD_Custom0_F7   | inst=4073028b pos_ov=1 neg_ov=0 -> is_subsat=0 WBSel=1 regW=0 illegal=1
+[PASS] BAD_RType_F7     | inst=427302b3 pos_ov=1 neg_ov=0 -> is_subsat=0 WBSel=1 regW=0 illegal=1
+-----------------------------------------------------------------
+ KET QUA tb_control: PASS = 12 | FAIL = 0
+=================================================================
+ >>> tb_control PASSED <<<
