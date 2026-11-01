@@ -22,7 +22,7 @@ Dự án thiết kế RTL và kiểm thử (Verification) hai lệnh mở rộng
 
 ---
 
-## 2. Xác nhận độ rộng và cách nối dây (Theo Góp ý 2)
+## 2. Xác nhận độ rộng và cách nối dây 
 
 | Module | Nội dung xác nhận | Trạng thái trong RTL |
 |---|---|---|
