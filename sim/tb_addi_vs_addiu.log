@@ -1,0 +1,28 @@
+================================================================================================================
+ DOI CHIEU TRUC TIEP: LENH ADDI CHUAN (SIGN-EXTEND) vs LENH ADDIU TUY CHINH (ZERO-EXTEND)
+================================================================================================================
+
+--- [NHOM 1] imm12[11] = 0 (0x000..0x7FF): ADDI va ADDIU cho ket qua Y HET NHAU ---
+[PASS] 1. Zero imm (0x000)          | rs1=00000000 imm=000 (b11=0) | ADDI(x8)=00000000 [ImmSel=0] vs ADDIU(x9)=00000000 [ImmSel=5]
+[PASS] 2. Small pos imm (0x001)     | rs1=00000064 imm=001 (b11=0) | ADDI(x8)=00000065 [ImmSel=0] vs ADDIU(x9)=00000065 [ImmSel=5]
+[PASS] 3. Max pos 12b (0x7FF=+2047) | rs1=00000010 imm=7ff (b11=0) | ADDI(x8)=0000080f [ImmSel=0] vs ADDIU(x9)=0000080f [ImmSel=5]
+[PASS] 4. Sign-flip (+ -> -, NoSat) | rs1=7fffff00 imm=200 (b11=0) | ADDI(x8)=80000100 [ImmSel=0] vs ADDIU(x9)=80000100 [ImmSel=5]
+[PASS] 5. inst[31:25]==SUBSAT_F7    | rs1=00000100 imm=427 (b11=0) | ADDI(x8)=00000527 [ImmSel=0] vs ADDIU(x9)=00000527 [ImmSel=5]
+
+--- [NHOM 2] imm12[11] = 1 (0x800..0xFFF): ADDI Sign-Extend (am) vs ADDIU Zero-Extend (duong) ---
+[PASS] 6. Bien am/duong (0x800)     | rs1=00000000 imm=800 (b11=1) | ADDI(x8)=fffff800 [ImmSel=0] vs ADDIU(x9)=00000800 [ImmSel=5]
+[PASS] 7. All-ones imm (0xFFF)      | rs1=00000000 imm=fff (b11=1) | ADDI(x8)=ffffffff [ImmSel=0] vs ADDIU(x9)=00000fff [ImmSel=5]
+[PASS] 8. Base 0x1000 + 0xFFF       | rs1=00001000 imm=fff (b11=1) | ADDI(x8)=00000fff [ImmSel=0] vs ADDIU(x9)=00001fff [ImmSel=5]
+[PASS] 9. Wrap 32b (FFFFF001+FFF)   | rs1=fffff001 imm=fff (b11=1) | ADDI(x8)=fffff000 [ImmSel=0] vs ADDIU(x9)=00000000 [ImmSel=5]
+[PASS] 10.Tu INT32_MIN + 0x800      | rs1=80000000 imm=800 (b11=1) | ADDI(x8)=7ffff800 [ImmSel=0] vs ADDIU(x9)=80000800 [ImmSel=5]
+[PASS] 11.Tu INT32_MAX + 0xFFF      | rs1=7fffffff imm=fff (b11=1) | ADDI(x8)=7ffffffe [ImmSel=0] vs ADDIU(x9)=80000ffe [ImmSel=5]
+[PASS] 12.imm=0xC27 (b11=1 & F7)    | rs1=00000100 imm=c27 (b11=1) | ADDI(x8)=fffffd27 [ImmSel=0] vs ADDIU(x9)=00000d27 [ImmSel=5]
+
+--- [NHOM 3] Kiem tra ghi vao thanh ghi dich rd = x0 ---
+[PASS] 13. Ghi vao rd = x0           | Ca ADDI va ADDIU voi rd=x0 deu giu nguyen x0 = 00000000
+
+--- [NHOM 4] 1000 Vector ngau nhien doi chieu song song ADDI vs ADDIU ---
+----------------------------------------------------------------------------------------------------------------
+ KET QUA DOI CHIEU tb_addi_vs_addiu: PASS = 1013 | FAIL = 0
+================================================================================================================
+ >>> tb_addi_vs_addiu PASSED SUCCESSFULLY! <<<

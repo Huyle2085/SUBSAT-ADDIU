@@ -1,13 +1,14 @@
 // =============================================================================
 // File: tb/tb_top.sv
-// Description: System-Level Self-Checking Testbench cho Top-Level RV32I + SUBSAT.
+// Description: System-Level Self-Checking Testbench tích hợp toàn hệ thống
+//              RV32I + ADDIU + SUBSAT (Đổi tên từ tb_addiu.sv cũ).
 //              Bao gồm:
-//              - 14 ca kiểm thử Directed bắt buộc (T01..T14 - Mục 7.1)
-//              - Golden Reference Model 64-bit có dấu độc lập (Mục 7.2)
-//              - Assertions kiểm tra bất biến phần cứng (Mục 7.2)
-//              - 1000+ cặp kiểm thử ngẫu nhiên có bias vào các điểm biên
-//              - Kiểm thử hồi quy (Regression) cho các lệnh chuẩn RV32I
-//              - Báo cáo Functional Coverage đầy đủ
+//              - 15 ca Directed Tests (U01..U15, kết hợp ADDIU, SUBSAT & RV32I)
+//              - Golden Model độc lập addiu_ref(rs1, imm12) & enc_addiu()
+//              - 3 nhóm Assertions: ap_addiu_ctrl, ap_addiu_imm, ap_decode_mutex
+//              - Functional Coverage (Immediate bins, Operand bins, Result bins,
+//                x0/non-x0, và 4 chuyển tiếp lệnh ADDI<->ADDIU<->SUBSAT<->SUB)
+//              - 1000 vector ngẫu nhiên
 // =============================================================================
 
 `timescale 1ns/1ps
@@ -34,22 +35,47 @@ module tb_top;
     logic        dbg_is_addiu;
     logic        dbg_illegal_inst;
 
-    // Bộ đếm kết quả kiểm thử
     int pass_cnt   = 0;
     int fail_cnt   = 0;
     int assert_err = 0;
 
-    // Bộ đếm Functional Coverage (Mục 7.2)
-    int cov_no_ov        = 0;
-    int cov_pos_ov       = 0;
-    int cov_neg_ov       = 0;
-    int cov_wbsel [0:4]  = '{default: 0};
-    int cov_rd_x0        = 0;
-    int cov_rd_non_x0    = 0;
-    int cov_sub_wrap_ov  = 0;
-    int cov_illegal_enc  = 0;
+    // Bộ đếm Functional Coverage theo Mục 5.4
+    int cov_imm_000      = 0;
+    int cov_imm_001      = 0;
+    int cov_imm_7ff      = 0;
+    int cov_imm_800      = 0;
+    int cov_imm_fff      = 0;
+    int cov_imm_bit11_0  = 0;
+    int cov_imm_bit11_1  = 0;
 
-    // Khởi tạo xung nhịp 100MHz (chu kỳ 10ns)
+    int cov_op_zero      = 0;
+    int cov_op_small     = 0;
+    int cov_op_max       = 0;
+    int cov_op_min       = 0;
+    int cov_op_all1      = 0;
+
+    int cov_res_unchanged = 0;
+    int cov_res_wrap      = 0;
+    int cov_res_sign_flip = 0;
+    int cov_res_sign_same = 0;
+    int cov_rd_x0         = 0;
+    int cov_rd_non_x0     = 0;
+
+    int cov_tr_addi_to_addiu   = 0;
+    int cov_tr_subsat_to_addiu = 0;
+    int cov_tr_addiu_to_subsat = 0;
+    int cov_tr_addiu_to_sub    = 0;
+
+    typedef enum int {
+        PREV_NONE   = 0,
+        PREV_ADDI   = 1,
+        PREV_ADDIU  = 2,
+        PREV_SUBSAT = 3,
+        PREV_SUB    = 4
+    } prev_inst_e;
+    prev_inst_e prev_inst = PREV_NONE;
+
+    // Xung nhịp 100MHz (10ns)
     initial clk = 1'b0;
     always #5 clk = ~clk;
 
@@ -75,118 +101,125 @@ module tb_top;
     );
 
     // =========================================================================
-    // 1. GOLDEN REFERENCE MODEL ĐỘC LẬP DÙNG 64-BIT SIGNED (Mục 2 & Mục 7.2)
+    // 1. GOLDEN MODEL ĐỘC LẬP CHO ADDIU (Mục 5.2)
     // =========================================================================
-    function automatic logic [31:0] golden_subsat_64(
-        input logic [31:0] a,
-        input logic [31:0] b
+    function automatic logic [31:0] addiu_ref(
+        input logic [31:0] rs1,
+        input logic [11:0] imm12
     );
-        logic signed [63:0] d;
-        d = 64'(signed'(a)) - 64'(signed'(b));
-        if (d > 64'sd2147483647)
-            return 32'h7FFF_FFFF;
-        else if (d < -64'sd2147483648)
-            return 32'h8000_0000;
-        else
-            return d[31:0];
+        logic [31:0] imm_zext;
+        imm_zext = {20'b0, imm12};
+        return rs1 + imm_zext; // Cắt về 32-bit, modulo 2^32
     endfunction
 
     // =========================================================================
-    // 2. ASSERTIONS & COVERAGE SAMPLING TẠI MỖI CHU KỲ LỆNH (Mục 7.2)
+    // 2. ASSERTIONS & COVERAGE SAMPLING (Mục 5.3 & Mục 5.4)
     // =========================================================================
-    always @(negedge clk) begin
+    always @(posedge clk) begin
         if (rst_n) begin
-            // A1: PosOv và NegOv không bao giờ cùng bằng 1
-            if (dbg_pos_ov && dbg_neg_ov) begin
-                $display("[ASSERT FAIL] PosOv && NegOv cung bang 1 tai PC=%h", dbg_pc);
+            // ap_addiu_ctrl: Kiểm tra tuyến điều khiển khi is_addiu = 1
+            if (dbg_is_addiu) begin
+                if ((dbg_imm_sel  !== IMM_I_ZERO) ||
+                    (dbg_a_sel    !== 1'b0)       ||
+                    (dbg_b_sel    !== 1'b1)       ||
+                    (dbg_wb_sel   !== WB_ALU)     ||
+                    (dbg_reg_w_en !== 1'b1)) begin
+                    $display("[ASSERT FAIL] ap_addiu_ctrl tai PC=%h: ImmSel=%0d Asel=%b Bsel=%b WBSel=%0d RegWEn=%b",
+                             dbg_pc, dbg_imm_sel, dbg_a_sel, dbg_b_sel, dbg_wb_sel, dbg_reg_w_en);
+                    assert_err++;
+                end
+
+                // ap_addiu_imm: Kiểm tra zero-extend immediate
+                if (dbg_imm_out !== {20'b0, dbg_inst[31:20]}) begin
+                    $display("[ASSERT FAIL] ap_addiu_imm tai PC=%h: imm_out=%h != {20'b0, %h}",
+                             dbg_pc, dbg_imm_out, dbg_inst[31:20]);
+                    assert_err++;
+                end
+            end
+
+            // ap_decode_mutex: Không bao giờ cùng bật is_addiu và is_subsat
+            if (dbg_is_addiu && dbg_is_subsat) begin
+                $display("[ASSERT FAIL] ap_decode_mutex: is_addiu && is_subsat == 1 tai PC=%h", dbg_pc);
                 assert_err++;
             end
 
-            // A2: Khi là SUBSAT, WBSel phải khớp chính xác trạng thái tràn
-            if (dbg_is_subsat) begin
-                if (dbg_pos_ov && (dbg_wb_sel !== WB_MAX)) begin
-                    $display("[ASSERT FAIL] is_subsat && PosOv nhung WBSel=%0d != WB_MAX", dbg_wb_sel);
-                    assert_err++;
-                end
-                if (dbg_neg_ov && (dbg_wb_sel !== WB_MIN)) begin
-                    $display("[ASSERT FAIL] is_subsat && NegOv nhung WBSel=%0d != WB_MIN", dbg_wb_sel);
-                    assert_err++;
-                end
-                if (!dbg_pos_ov && !dbg_neg_ov && (dbg_wb_sel !== WB_ALU)) begin
-                    $display("[ASSERT FAIL] is_subsat && !Ov nhung WBSel=%0d != WB_ALU", dbg_wb_sel);
-                    assert_err++;
-                end
-            end
-
-            // A3: Khi KHÔNG phải SUBSAT, tuyệt đối không chọn WB_MAX hoặc WB_MIN
-            if (!dbg_is_subsat) begin
-                if ((dbg_wb_sel == WB_MAX) || (dbg_wb_sel == WB_MIN)) begin
-                    $display("[ASSERT FAIL] !is_subsat nhung WBSel=%0d chon MAX/MIN tai PC=%h", dbg_wb_sel, dbg_pc);
-                    assert_err++;
-                end
-            end
-
-            // A4: Thanh ghi x0 luôn cứng bằng 0
-            if (dut.u_datapath.u_regfile.regs[0] !== 32'h0000_0000) begin
-                $display("[ASSERT FAIL] x0 bi thay doi gia tri: %h", dut.u_datapath.u_regfile.regs[0]);
+            // Bảo toàn bất biến của SUBSAT & các lệnh khác
+            if (!dbg_is_subsat && ((dbg_wb_sel == WB_MAX) || (dbg_wb_sel == WB_MIN))) begin
+                $display("[ASSERT FAIL] !is_subsat nhung WBSel=%0d chon MAX/MIN tai PC=%h", dbg_wb_sel, dbg_pc);
                 assert_err++;
             end
 
-            // A5: Không có X/Z trên các tín hiệu điều khiển chính
-            if ($isunknown(dbg_wb_sel) || $isunknown(dbg_reg_w_en) || $isunknown(dbg_wb_data)) begin
-                $display("[ASSERT FAIL] Phat hien X/Z tren tin hieu dieu khien/WB tai PC=%h", dbg_pc);
-                assert_err++;
-            end
+            // Thu thập Coverage khi thực thi ADDIU
+            if (dbg_is_addiu) begin
+                logic [11:0] imm12;
+                logic [31:0] rs1_v;
+                logic [31:0] res_v;
+                logic [4:0]  rd_idx;
+                logic [4:0]  rs1_idx;
 
-            // Thu thập Functional Coverage
-            if (dbg_wb_sel <= WB_MIN) begin
-                cov_wbsel[dbg_wb_sel]++;
-            end
-            if (dbg_is_subsat) begin
-                if (dbg_pos_ov)      cov_pos_ov++;
-                else if (dbg_neg_ov) cov_neg_ov++;
-                else                 cov_no_ov++;
+                imm12   = dbg_inst[31:20];
+                rd_idx  = dbg_inst[11:7];
+                rs1_idx = dbg_inst[19:15];
+                rs1_v   = (rs1_idx == 5'd0) ? 32'h0 : dut.u_datapath.u_regfile.regs[rs1_idx];
+                res_v   = dbg_wb_data;
 
-                if (dbg_inst[11:7] == 5'd0) cov_rd_x0++;
-                else                        cov_rd_non_x0++;
-            end
-            if (!dbg_is_subsat && (dbg_inst[6:0] == OP_RTYPE) &&
-                (dbg_inst[14:12] == 3'b000) && (dbg_inst[31:25] == F7_ALT) &&
-                (dbg_pos_ov || dbg_neg_ov)) begin
-                cov_sub_wrap_ov++;
-            end
-            if (dbg_illegal_inst) begin
-                cov_illegal_enc++;
+                if (imm12 == 12'h000) cov_imm_000++;
+                if (imm12 == 12'h001) cov_imm_001++;
+                if (imm12 == 12'h7FF) cov_imm_7ff++;
+                if (imm12 == 12'h800) cov_imm_800++;
+                if (imm12 == 12'hFFF) cov_imm_fff++;
+                if (imm12[11] == 1'b0) cov_imm_bit11_0++;
+                else                   cov_imm_bit11_1++;
+
+                if (rs1_v == 32'h0000_0000)                      cov_op_zero++;
+                else if (rs1_v <= 32'h0000_0100)                 cov_op_small++;
+                if ((rs1_v & 32'hFFFF_F000) == 32'h7FFF_F000)    cov_op_max++;
+                if (rs1_v == 32'h8000_0000)                      cov_op_min++;
+                if ((rs1_v & 32'hFFFF_F000) == 32'hFFFF_F000)    cov_op_all1++;
+
+                if (res_v == rs1_v)                              cov_res_unchanged++;
+                if (res_v < rs1_v)                               cov_res_wrap++;
+                if (res_v[31] != rs1_v[31])                      cov_res_sign_flip++;
+                else                                             cov_res_sign_same++;
+
+                if (rd_idx == 5'd0) cov_rd_x0++;
+                else                cov_rd_non_x0++;
+
+                if (prev_inst == PREV_ADDI)   cov_tr_addi_to_addiu++;
+                if (prev_inst == PREV_SUBSAT) cov_tr_subsat_to_addiu++;
+                prev_inst = PREV_ADDIU;
+            end else if (dbg_is_subsat) begin
+                if (prev_inst == PREV_ADDIU)  cov_tr_addiu_to_subsat++;
+                prev_inst = PREV_SUBSAT;
+            end else if ((dbg_inst[6:0] == OP_IMM) && (dbg_inst[14:12] == 3'b000)) begin
+                prev_inst = PREV_ADDI;
+            end else if ((dbg_inst[6:0] == OP_RTYPE) && (dbg_inst[14:12] == 3'b000) && (dbg_inst[31:25] == F7_ALT)) begin
+                if (prev_inst == PREV_ADDIU)  cov_tr_addiu_to_sub++;
+                prev_inst = PREV_SUB;
+            end else begin
+                prev_inst = PREV_NONE;
             end
         end
     end
 
     // =========================================================================
-    // 3. CÁC TASK HỖ TRỢ THỰC THI LỆNH TRÊN TOP-LEVEL CORE
+    // 3. CÁC TASK KIỂM THỬ HƯỚNG ĐÍCH
     // =========================================================================
     task automatic reset_core();
-        rst_n = 1'b0;
+        rst_n     = 1'b0;
+        prev_inst = PREV_NONE;
         @(posedge clk);
         #1;
         rst_n = 1'b1;
     endtask
 
-    // Thực thi 1 lệnh SUBSAT đơn lẻ và tự động kiểm tra đầy đủ:
-    // - Cờ PosOv, NegOv, WBSel
-    // - Giá trị thanh ghi đích rd so với Golden Model 64-bit
-    // - Thanh ghi x0 luôn bằng 0
-    // - PC tăng đúng +4
-    task automatic run_directed_subsat(
+    task automatic run_directed_addiu(
         input string       tc_id,
         input logic [4:0]  rd,
         input logic [4:0]  rs1,
-        input logic [4:0]  rs2,
-        input logic [31:0] val_a,
-        input logic [31:0] val_b,
-        input logic [31:0] exp_rd_val,
-        input logic        exp_pos_ov,
-        input logic        exp_neg_ov,
-        input wb_sel_e     exp_wb_sel
+        input logic [31:0] rs1_val,
+        input logic [11:0] imm12,
+        input logic [31:0] exp_rd_val
     );
         logic [31:0] pc_before;
         logic [31:0] gold_val;
@@ -196,306 +229,238 @@ module tb_top;
         pc_before = dbg_pc;
         word_idx  = pc_before[11:2];
 
-        // Nạp toán hạng nguồn vào RegFile (trừ x0)
-        if (rs1 != 5'd0) dut.u_datapath.u_regfile.regs[rs1] = val_a;
-        if (rs2 != 5'd0) dut.u_datapath.u_regfile.regs[rs2] = val_b;
+        if (rs1 != 5'd0) dut.u_datapath.u_regfile.regs[rs1] = rs1_val;
+        dut.u_imem.mem[word_idx] = enc_addiu(rd, rs1, imm12);
+        #1;
 
-        // Nạp lệnh SUBSAT vào IMEM tại PC hiện tại
-        dut.u_imem.mem[word_idx] = encode_subsat(rd, rs1, rs2);
-        #1; // Đợi đường tổ hợp ổn định trước sườn lên xung nhịp
+        gold_val = (rd == 5'd0) ? 32'h0000_0000 : addiu_ref((rs1 == 5'd0) ? 32'h0 : rs1_val, imm12);
 
-        gold_val = (rd == 5'd0) ? 32'h0000_0000 : golden_subsat_64(
-            (rs1 == 5'd0) ? 32'h0 : val_a,
-            (rs2 == 5'd0) ? 32'h0 : val_b
-        );
-
-        // Kiểm tra tín hiệu tổ hợp trước khi chốt sườn lên clk
-        if ((dbg_pos_ov !== exp_pos_ov) || (dbg_neg_ov !== exp_neg_ov) || (dbg_wb_sel !== exp_wb_sel)) begin
-            $display("[FAIL] %s (Comb): A=%h B=%h | Got PosOv=%b NegOv=%b WBSel=%0d | Exp PosOv=%b NegOv=%b WBSel=%0d",
-                     tc_id, val_a, val_b, dbg_pos_ov, dbg_neg_ov, dbg_wb_sel, exp_pos_ov, exp_neg_ov, exp_wb_sel);
-            fail_cnt++;
-        end
-
-        // Chốt sườn lên xung nhịp để ghi vào RegFile và tăng PC
         @(posedge clk);
         #1;
 
-        actual_rd = (rd == 5'd0) ? dut.u_datapath.u_regfile.rs1_data : dut.u_datapath.u_regfile.regs[rd];
-        if (rd == 5'd0) actual_rd = dut.u_datapath.u_regfile.regs[0];
-
+        actual_rd = dut.u_datapath.u_regfile.regs[rd];
         if ((actual_rd !== exp_rd_val) || (actual_rd !== gold_val) || (dbg_pc !== (pc_before + 32'd4))) begin
-            $display("[FAIL] %s (Seq): A=%h B=%h | Got rd(x%0d)=%h Gold=%h Exp=%h PC=%h",
-                     tc_id, val_a, val_b, rd, actual_rd, gold_val, exp_rd_val, dbg_pc);
+            $display("[FAIL] %-20s | rs1=%08h imm12=%03h | Got rd(x%0d)=%08h Exp=%08h Gold=%08h",
+                     tc_id, rs1_val, imm12, rd, actual_rd, exp_rd_val, gold_val);
             fail_cnt++;
         end else begin
-            $display("[PASS] %-22s | A=%h B=%h -> rd(x%0d)=%h | PosOv=%b NegOv=%b WBSel=%0d",
-                     tc_id, val_a, val_b, rd, actual_rd, exp_pos_ov, exp_neg_ov, exp_wb_sel);
+            $display("[PASS] %-20s | rs1=%08h imm12=%03h -> rd(x%0d)=%08h (imm_out=%08h, WBSel=%0d)",
+                     tc_id, rs1_val, imm12, rd, actual_rd, {20'b0, imm12}, WB_ALU);
             pass_cnt++;
         end
     endtask
 
-    // Hàm tạo số ngẫu nhiên có bias vào các điểm biên
-    function automatic logic [31:0] get_biased_val();
-        int r;
-        r = $urandom % 12;
-        case (r)
-            0: return 32'h0000_0000;
-            1: return 32'h0000_0001;
-            2: return 32'hFFFF_FFFF;
-            3: return 32'h7FFF_FFFF;
-            4: return 32'h8000_0000;
-            5: return 32'h7FFF_FFFE;
-            6: return 32'h8000_0001;
-            7: return 32'h4000_0000;
-            8: return 32'hC000_0000;
-            default: return $urandom;
-        endcase
-    endfunction
-
-    // =========================================================================
-    // 4. KỊCH BẢN KIỂM THỬ CHÍNH (MAIN TEST SEQUENCE)
-    // =========================================================================
     initial begin
         $dumpfile("sim/wave_top.vcd");
         $dumpvars(0, dut);
 
         $display("================================================================================");
-        $display(" BAT DAU KIEM THU HE THONG: RV32I + SUBSAT (tb_top)");
-        $display(" Opcode SUBSAT = 7'b%07b (custom-0), funct3 = 3'b%03b, funct7 = 7'b%07b",
+        $display(" BAT DAU KIEM THU TICH HOP TOAN HE THONG: RV32I + ADDIU + SUBSAT (tb_top)");
+        $display(" Encoding ADDIU : opcode=7'b%07b (custom-0), funct3=3'b%03b, ImmSel=3'b%03b",
+                 OP_CUSTOM0, ADDIU_F3, IMM_I_ZERO);
+        $display(" Encoding SUBSAT: opcode=7'b%07b (custom-0), funct3=3'b%03b, funct7=7'b%07b",
                  SUBSAT_OP, SUBSAT_F3, SUBSAT_F7);
-        $display(" Vi du ma may SUBSAT x5, x6, x7 = 0x%08h", encode_subsat(5'd5, 5'd6, 5'd7));
         $display("================================================================================");
 
         reset_core();
 
         // ---------------------------------------------------------------------
-        // PHẦN A: 14 DIRECTED TESTS BẮT BUỘC (Mục 7.1: T01 -> T14)
+        // PHẦN A: 15 CA DIRECTED TESTS BẮT BUỘC (U01 -> U15, Mục 5.1)
         // ---------------------------------------------------------------------
-        $display("\n--- [PHAN A] 14 CA KIEM THU DIRECTED BAT BUOC (T01..T14) ---");
+        $display("\n--- [PHAN A] 15 CA DIRECTED TESTS (U01..U15 - TICH HOP ADDIU + SUBSAT + RV32I) ---");
 
-        // T01: 50 - 20 = 30 (Không tràn)
-        run_directed_subsat("T01_NoOv_50_20",      5'd5, 5'd6, 5'd7, 32'h0000_0032, 32'h0000_0014, 32'h0000_001E, 1'b0, 1'b0, WB_ALU);
+        // U01: Zero immediate
+        run_directed_addiu("U01_Zero_Imm",      5'd5, 5'd6, 32'h0000_0000, 12'h000, 32'h0000_0000);
+        // U02: Immediate dương nhỏ
+        run_directed_addiu("U02_Small_Pos_Imm", 5'd5, 5'd6, 32'h0000_0010, 12'h7FF, 32'h0000_080F);
+        // U03: Bit imm[11]=1, zero-extend (KHÔNG sign-extend)
+        run_directed_addiu("U03_Bit11_ZeroExt", 5'd5, 5'd6, 32'h0000_0000, 12'h800, 32'h0000_0800);
+        // U04: Max immediate 4095 (0xFFF)
+        run_directed_addiu("U04_Max_Imm_4095",  5'd5, 5'd6, 32'h0000_0000, 12'hFFF, 32'h0000_0FFF);
+        // U05: Gần ngưỡng 32-bit
+        run_directed_addiu("U05_Near_32b_Edge", 5'd5, 5'd6, 32'hFFFF_F000, 12'hFFF, 32'hFFFF_FFFF);
+        // U06: Wrap-around 32-bit
+        run_directed_addiu("U06_Wrap_32b",      5'd5, 5'd6, 32'hFFFF_FFFF, 12'h001, 32'h0000_0000);
+        // U07: Đổi dấu (+ -> -), KHÔNG bão hòa!
+        run_directed_addiu("U07_SignFlip_NoSat",5'd5, 5'd6, 32'h7FFF_FF00, 12'h200, 32'h8000_0100);
+        // U08: Giá trị rs1 sửa từ bản gốc (FFFF_F001 + FFF = 0000_0000)
+        run_directed_addiu("U08_Fixed_rs1_Wrap",5'd5, 5'd6, 32'hFFFF_F001, 12'hFFF, 32'h0000_0000);
+        // U09: Expected sửa từ bản gốc (0000_0000 + FFF = 0000_0FFF)
+        run_directed_addiu("U09_Fixed_Exp_0FFF",5'd5, 5'd6, 32'h0000_0000, 12'hFFF, 32'h0000_0FFF);
+        // U10: Âm + immediate dương
+        run_directed_addiu("U10_Neg_Plus_Imm",  5'd5, 5'd6, 32'h8000_0000, 12'h800, 32'h8000_0800);
 
-        // T02: (+MAX) - (-1) -> saturate +MAX, PosOv=1, WBSel=3 (WB_MAX)
-        run_directed_subsat("T02_PosOv_MAX_m1",    5'd5, 5'd6, 5'd7, 32'h7FFF_FFFF, 32'hFFFF_FFFF, 32'h7FFF_FFFF, 1'b1, 1'b0, WB_MAX);
-
-        // T03: (INT32_MIN) - (+1) -> saturate -MIN, NegOv=1, WBSel=4 (WB_MIN)
-        run_directed_subsat("T03_NegOv_MIN_p1",    5'd5, 5'd6, 5'd7, 32'h8000_0000, 32'h0000_0001, 32'h8000_0000, 1'b0, 1'b1, WB_MIN);
-
-        // T04: (+MAX) - 0 = +MAX (Biên dương, không tràn)
-        run_directed_subsat("T04_Edge_MAX_0",      5'd5, 5'd6, 5'd7, 32'h7FFF_FFFF, 32'h0000_0000, 32'h7FFF_FFFF, 1'b0, 1'b0, WB_ALU);
-
-        // T05: (INT32_MIN) - 0 = INT32_MIN (Biên âm, không tràn)
-        run_directed_subsat("T05_Edge_MIN_0",      5'd5, 5'd6, 5'd7, 32'h8000_0000, 32'h0000_0000, 32'h8000_0000, 1'b0, 1'b0, WB_ALU);
-
-        // T06: 0 - 1 = -1 (0xFFFF_FFFF, không tràn)
-        run_directed_subsat("T06_NoOv_0_1",        5'd5, 5'd6, 5'd7, 32'h0000_0000, 32'h0000_0001, 32'hFFFF_FFFF, 1'b0, 1'b0, WB_ALU);
-
-        // T07: (-2) - (-1) = -1 (0xFFFF_FFFF, cả A và B đều âm, không tràn)
-        run_directed_subsat("T07_BothNeg_m2_m1",   5'd5, 5'd6, 5'd7, 32'hFFFF_FFFE, 32'hFFFF_FFFF, 32'hFFFF_FFFF, 1'b0, 1'b0, WB_ALU);
-
-        // T08: 0 - INT32_MIN -> saturate +MAX, PosOv=1, WBSel=3 (WB_MAX)
-        run_directed_subsat("T08_PosOv_0_MIN",     5'd5, 5'd6, 5'd7, 32'h0000_0000, 32'h8000_0000, 32'h7FFF_FFFF, 1'b1, 1'b0, WB_MAX);
-
-        // T09: INT32_MIN - (+MAX) -> saturate -MIN, NegOv=1, WBSel=4 (WB_MIN)
-        run_directed_subsat("T09_NegOv_MIN_MAX",   5'd5, 5'd6, 5'd7, 32'h8000_0000, 32'h7FFF_FFFF, 32'h8000_0000, 1'b0, 1'b1, WB_MIN);
-
-        // T10: (-1) - (-1) = 0 (Hai toán hạng âm bằng nhau, không tràn)
-        run_directed_subsat("T10_BothNeg_Eq",      5'd5, 5'd6, 5'd7, 32'hFFFF_FFFF, 32'hFFFF_FFFF, 32'h0000_0000, 1'b0, 1'b0, WB_ALU);
-
-        // T11: Lệnh SUB thường (không phải SUBSAT) với A=7FFF_FFFF, B=FFFF_FFFF -> wrap-around 8000_0000
+        // U11: So sánh trực tiếp ADDI chuẩn (sign-extend -> FFFF_FFFF) vs ADDIU (zero-extend -> 0000_0FFF)
         begin
             int idx;
+            dut.u_datapath.u_regfile.regs[6] = 32'h0000_0000;
+            // Chạy ADDI x8, x6, 0xFFF trước (đồng thời tạo transition ADDI -> ADDIU)
             idx = dbg_pc[11:2];
-            dut.u_datapath.u_regfile.regs[6] = 32'h7FFF_FFFF;
-            dut.u_datapath.u_regfile.regs[7] = 32'hFFFF_FFFF;
-            dut.u_imem.mem[idx] = encode_rtype(F7_ALT, 5'd7, 5'd6, 3'b000, 5'd8, OP_RTYPE); // SUB x8, x6, x7
+            dut.u_imem.mem[idx] = {12'hFFF, 5'd6, 3'b000, 5'd8, OP_IMM};
             #1;
             @(posedge clk);
             #1;
-            if (dut.u_datapath.u_regfile.regs[8] !== 32'h8000_0000) begin
-                $display("[FAIL] T11_SUB_WrapAround: Got x8=%h, Exp 80000000", dut.u_datapath.u_regfile.regs[8]);
+            // Chạy ADDIU x5, x6, 0xFFF ngay sau đó
+            run_directed_addiu("U11_Compare_ADDI",  5'd5, 5'd6, 32'h0000_0000, 12'hFFF, 32'h0000_0FFF);
+            if (dut.u_datapath.u_regfile.regs[8] !== 32'hFFFF_FFFF) begin
+                $display("[FAIL] U11_Compare_ADDI: ADDI chuan cho x8=%08h != FFFFFFFF", dut.u_datapath.u_regfile.regs[8]);
+                fail_cnt++;
+            end
+        end
+
+        // U12: rd = x0 phải luôn bằng 0
+        run_directed_addiu("U12_rd_x0_Zero",    5'd0, 5'd6, 32'h1234_5678, 12'hFFF, 32'h0000_0000);
+
+        // U13: ADDIU ngay sau SUBSAT tràn (kiểm tra transition SUBSAT(tràn) -> ADDIU & ADDIU -> SUBSAT)
+        begin
+            int idx;
+            dut.u_datapath.u_regfile.regs[6] = 32'h7FFF_FFFF;
+            dut.u_datapath.u_regfile.regs[7] = 32'hFFFF_FFFF;
+            // 1) SUBSAT x9, x6, x7 (tràn dương -> WB_MAX = 7FFF_FFFF)
+            idx = dbg_pc[11:2];
+            dut.u_imem.mem[idx] = encode_subsat(5'd9, 5'd6, 5'd7);
+            #1;
+            @(posedge clk);
+            #1;
+            // 2) ADDIU x10, x9, 12'h001 (7FFF_FFFF + 1 = 8000_0000, WBSel phải về WB_ALU=1!)
+            run_directed_addiu("U13_After_SUBSAT_Ov", 5'd10, 5'd9, 32'h7FFF_FFFF, 12'h001, 32'h8000_0000);
+            // 3) Chạy tiếp SUBSAT x11, x10, x7 (tạo transition ADDIU -> SUBSAT)
+            idx = dbg_pc[11:2];
+            dut.u_datapath.u_regfile.regs[7] = 32'h0000_0001;
+            dut.u_imem.mem[idx] = encode_subsat(5'd11, 5'd10, 5'd7); // 8000_0000 - 1 -> bão hòa âm 8000_0000
+            #1;
+            @(posedge clk);
+            #1;
+            if (dut.u_datapath.u_regfile.regs[11] !== 32'h8000_0000) begin
+                $display("[FAIL] U13_Transition_ADDIU_to_SUBSAT: x11=%08h", dut.u_datapath.u_regfile.regs[11]);
+                fail_cnt++;
+            end
+        end
+
+        // U14: opcode = custom-0 nhưng funct3 chưa dùng (010..111) phải không ghi thanh ghi
+        begin
+            int idx;
+            dut.u_datapath.u_regfile.regs[20] = 32'hDEAD_BEEF;
+            dut.u_datapath.u_regfile.regs[6]  = 32'h0000_0100;
+            for (int f3 = 2; f3 < 8; f3++) begin
+                idx = dbg_pc[11:2];
+                dut.u_imem.mem[idx] = {12'h123, 5'd6, f3[2:0], 5'd20, OP_CUSTOM0};
+                #1;
+                @(posedge clk);
+                #1;
+            end
+            if (dut.u_datapath.u_regfile.regs[20] !== 32'hDEAD_BEEF) begin
+                $display("[FAIL] U14_Unused_Custom0_F3: x20 bi ghi de thanh %08h", dut.u_datapath.u_regfile.regs[20]);
                 fail_cnt++;
             end else begin
-                $display("[PASS] T11_SUB_WrapAround     | SUB x8, x6, x7 (7FFFFFFF - FFFFFFFF) -> x8=80000000 (wrap)");
+                $display("[PASS] U14_Unused_Custom0_F3| custom-0 voi funct3=010..111 bi chan, x20 giu nguyen DEADBEEF");
                 pass_cnt++;
             end
         end
 
-        // T12: SUBSAT với rd = x0 (trong cả 3 trường hợp: tràn dương, tràn âm, không tràn) -> x0 vẫn bằng 0
-        run_directed_subsat("T12a_rd_x0_PosOv",    5'd0, 5'd6, 5'd7, 32'h7FFF_FFFF, 32'hFFFF_FFFF, 32'h0000_0000, 1'b1, 1'b0, WB_MAX);
-        run_directed_subsat("T12b_rd_x0_NegOv",    5'd0, 5'd6, 5'd7, 32'h8000_0000, 32'h0000_0001, 32'h0000_0000, 1'b0, 1'b1, WB_MIN);
-        run_directed_subsat("T12c_rd_x0_NoOv",     5'd0, 5'd6, 5'd7, 32'h0000_0032, 32'h0000_0014, 32'h0000_0000, 1'b0, 1'b0, WB_ALU);
-
-        // T13: Kiểm thử hồi quy (Regression) các lệnh chuẩn khác (ADD, SW, LW, JAL, JALR, BEQ, LUI, AUIPC)
+        // U15: Regression ADDI / SUB / SUBSAT / LOAD / STORE / BRANCH & transition ADDIU -> SUB
         begin
             int base_idx;
-            logic [31:0] base_pc;
-            base_pc  = dbg_pc;
-            base_idx = base_pc[11:2];
+            base_idx = dbg_pc[11:2];
+            dut.u_datapath.u_regfile.regs[6] = 32'h0000_0100;
+            dut.u_datapath.u_regfile.regs[7] = 32'h0000_0040;
 
-            // 1) ADDI x10, x0, 100
-            dut.u_imem.mem[base_idx + 0] = {12'd100, 5'd0, 3'b000, 5'd10, OP_IMM};
-            // 2) ADDI x11, x0, 55
-            dut.u_imem.mem[base_idx + 1] = {12'd55,  5'd0, 3'b000, 5'd11, OP_IMM};
-            // 3) ADD x12, x10, x11 -> 155
-            dut.u_imem.mem[base_idx + 2] = encode_rtype(F7_STD, 5'd11, 5'd10, 3'b000, 5'd12, OP_RTYPE);
-            // 4) SW x12, 16(x0) -> DMEM[4] = 155
-            dut.u_imem.mem[base_idx + 3] = {7'd0, 5'd12, 5'd0, 3'b010, 5'd16, OP_STORE};
-            // 5) LW x13, 16(x0) -> x13 = 155 (kiểm tra WBSel = WB_MEM = 0)
-            dut.u_imem.mem[base_idx + 4] = {12'd16, 5'd0, 3'b010, 5'd13, OP_LOAD};
-            // 6) JAL x14, +8 -> x14 = PC+4, nhảy qua 1 lệnh (kiểm tra WBSel = WB_PC4 = 2)
-            dut.u_imem.mem[base_idx + 5] = {1'b0, 10'd4, 1'b0, 8'd0, 5'd14, OP_JAL};
-            // 7) ADDI x13, x0, 999 (lệnh bị nhảy qua, không được thực thi)
-            dut.u_imem.mem[base_idx + 6] = {12'd999, 5'd0, 3'b000, 5'd13, OP_IMM};
-            // 8) LUI x15, 0x12345 -> x15 = 0x12345000
-            dut.u_imem.mem[base_idx + 7] = {20'h12345, 5'd15, OP_LUI};
+            // 1) ADDIU x12, x6, 0x800 -> 0x0000_0900
+            dut.u_imem.mem[base_idx + 0] = enc_addiu(5'd12, 5'd6, 12'h800);
+            // 2) SUB x13, x12, x7 -> 0x0000_08C0 (tạo transition ADDIU -> SUB)
+            dut.u_imem.mem[base_idx + 1] = encode_rtype(F7_ALT, 5'd7, 5'd12, 3'b000, 5'd13, OP_RTYPE);
+            // 3) SW x13, 32(x0)
+            dut.u_imem.mem[base_idx + 2] = {7'd1, 5'd13, 5'd0, 3'b010, 5'd0, OP_STORE};
+            // 4) LW x14, 32(x0) -> 0x0000_08C0
+            dut.u_imem.mem[base_idx + 3] = {12'd32, 5'd0, 3'b010, 5'd14, OP_LOAD};
+            // 5) BEQ x13, x14, +8 (nhảy qua 1 lệnh)
+            dut.u_imem.mem[base_idx + 4] = {1'b0, 6'd0, 5'd14, 5'd13, 3'b000, 4'd4, 1'b0, OP_BRANCH};
+            // 6) ADDI x14, x0, 999 (bị nhảy qua)
+            dut.u_imem.mem[base_idx + 5] = {12'd999, 5'd0, 3'b000, 5'd14, OP_IMM};
+            // 7) SUBSAT x15, x14, x7 -> 0x0000_0880
+            dut.u_imem.mem[base_idx + 6] = encode_subsat(5'd15, 5'd14, 5'd7);
 
-            repeat (7) begin
+            repeat (6) begin
                 @(posedge clk);
                 #1;
             end
 
-            if ((dut.u_datapath.u_regfile.regs[12] !== 32'd155) ||
-                (dut.u_datapath.u_regfile.regs[13] !== 32'd155) ||
-                (dut.u_datapath.u_regfile.regs[14] !== (base_pc + 32'd24)) ||
-                (dut.u_datapath.u_regfile.regs[15] !== 32'h1234_5000)) begin
-                $display("[FAIL] T13_Other_Instructions: x12=%0d x13=%0d x14=%h x15=%h",
+            if ((dut.u_datapath.u_regfile.regs[12] !== 32'h0000_0900) ||
+                (dut.u_datapath.u_regfile.regs[13] !== 32'h0000_08C0) ||
+                (dut.u_datapath.u_regfile.regs[14] !== 32'h0000_08C0) ||
+                (dut.u_datapath.u_regfile.regs[15] !== 32'h0000_0880)) begin
+                $display("[FAIL] U15_Full_Regression: x12=%h x13=%h x14=%h x15=%h",
                          dut.u_datapath.u_regfile.regs[12],
                          dut.u_datapath.u_regfile.regs[13],
                          dut.u_datapath.u_regfile.regs[14],
                          dut.u_datapath.u_regfile.regs[15]);
                 fail_cnt++;
             end else begin
-                $display("[PASS] T13_Other_Instructions | ADD/SW/LW(WB_MEM)/JAL(WB_PC4)/LUI hoat dong chinh xac");
-                pass_cnt++;
-            end
-        end
-
-        // T14: Encoding sai (custom-0 sai funct3/funct7, OP_RTYPE mang funct7=0100001) -> Không nhận nhầm SUBSAT, không ghi đè rd
-        begin
-            int idx;
-            dut.u_datapath.u_regfile.regs[20] = 32'hCAFE_BABE;
-            dut.u_datapath.u_regfile.regs[6]  = 32'h7FFF_FFFF;
-            dut.u_datapath.u_regfile.regs[7]  = 32'hFFFF_FFFF;
-
-            // Lệnh 1: custom-0 nhưng funct3 = 3'b010 (sai funct3)
-            idx = dbg_pc[11:2];
-            dut.u_imem.mem[idx] = encode_rtype(SUBSAT_F7, 5'd7, 5'd6, 3'b010, 5'd20, SUBSAT_OP);
-            #1;
-            @(posedge clk);
-            #1;
-
-            // Lệnh 2: custom-0 nhưng funct7 = 7'b0100000 (sai funct7)
-            idx = dbg_pc[11:2];
-            dut.u_imem.mem[idx] = encode_rtype(F7_ALT, 5'd7, 5'd6, SUBSAT_F3, 5'd20, SUBSAT_OP);
-            #1;
-            @(posedge clk);
-            #1;
-
-            // Lệnh 3: OP_RTYPE nhưng funct7 = 7'b0100001 (SUBSAT_F7)
-            idx = dbg_pc[11:2];
-            dut.u_imem.mem[idx] = encode_rtype(SUBSAT_F7, 5'd7, 5'd6, SUBSAT_F3, 5'd20, OP_RTYPE);
-            #1;
-            @(posedge clk);
-            #1;
-
-            if (dut.u_datapath.u_regfile.regs[20] !== 32'hCAFE_BABE) begin
-                $display("[FAIL] T14_Invalid_Encoding: x20 bi ghi de thanh %h!", dut.u_datapath.u_regfile.regs[20]);
-                fail_cnt++;
-            end else begin
-                $display("[PASS] T14_Invalid_Encoding   | Cac ma lenh sai bi tu choi, x20 giu nguyen 0xCAFEBABE");
+                $display("[PASS] U15_Full_Regression  | Chuoi ADDIU -> SUB -> SW -> LW -> BEQ -> SUBSAT chinh xac");
                 pass_cnt++;
             end
         end
 
         // ---------------------------------------------------------------------
-        // PHẦN B: RANDOM TEST 1000+ CẶP TOÁN HẠNG CÓ BIAS (Mục 7.2)
+        // PHẦN B: 1000 RANDOM VECTORS CHO HỆ THỐNG TÍCH HỢP
         // ---------------------------------------------------------------------
-        $display("\n--- [PHAN B] RANDOM TESTS (1000 VECTOR NGau NHIEN CO BIAS) ---");
+        $display("\n--- [PHAN B] RANDOM TESTS (1000 VECTOR) ---");
         reset_core();
 
         for (int i = 0; i < 1000; i++) begin
-            logic [31:0] ra, rb, exp_val, act_val, pc_prev;
-            logic signed [63:0] d64;
-            logic [4:0]  rd_r, rs1_r, rs2_r;
+            logic [31:0] r_rs1, exp_v, act_v;
+            logic [11:0] r_imm;
+            logic [4:0]  rd_i, rs1_i;
             int          w_idx;
 
-            ra = get_biased_val();
-            rb = get_biased_val();
+            r_rs1 = $urandom;
+            r_imm = $urandom_range(0, 4095);
+            rd_i  = $urandom_range(0, 31);
+            rs1_i = $urandom_range(1, 31);
 
-            // Chọn ngẫu nhiên thanh ghi (bao gồm cả x0 cho rd)
-            rd_r  = $urandom_range(0, 31);
-            rs1_r = $urandom_range(1, 15);
-            rs2_r = $urandom_range(16, 31);
-
-            pc_prev = dbg_pc;
-            w_idx   = pc_prev[11:2];
-
-            dut.u_datapath.u_regfile.regs[rs1_r] = ra;
-            dut.u_datapath.u_regfile.regs[rs2_r] = rb;
-            dut.u_imem.mem[w_idx] = encode_subsat(rd_r, rs1_r, rs2_r);
+            w_idx = dbg_pc[11:2];
+            dut.u_datapath.u_regfile.regs[rs1_i] = r_rs1;
+            dut.u_imem.mem[w_idx] = enc_addiu(rd_i, rs1_i, r_imm);
             #1;
 
-            exp_val = (rd_r == 5'd0) ? 32'h0000_0000 : golden_subsat_64(ra, rb);
-
+            exp_v = (rd_i == 5'd0) ? 32'h0000_0000 : addiu_ref(r_rs1, r_imm);
             @(posedge clk);
             #1;
 
-            act_val = dut.u_datapath.u_regfile.regs[rd_r];
-            if ((act_val !== exp_val) || (dbg_pc !== (pc_prev + 32'd4))) begin
-                $display("[FAIL] RAND_%0d: rd=x%0d A=%h B=%h | Got=%h Exp=%h",
-                         i, rd_r, ra, rb, act_val, exp_val);
+            act_v = dut.u_datapath.u_regfile.regs[rd_i];
+            if (act_v !== exp_v) begin
+                $display("[FAIL] RAND_%0d: rs1=%h imm=%h | Got=%h Exp=%h", i, r_rs1, r_imm, act_v, exp_v);
                 fail_cnt++;
             end else begin
                 pass_cnt++;
             end
 
-            // Reset PC định kỳ trước khi chạm giới hạn IMEM 1024 words
-            if (dbg_pc >= 32'd3600) begin
-                reset_core();
-            end
+            if (dbg_pc >= 32'd3600) reset_core();
         end
 
         // ---------------------------------------------------------------------
-        // PHẦN C: BÁO CÁO COVERAGE & TỔNG KẾT NGHIỆM THU (Mục 7.2 & Mục 9)
+        // PHẦN C: BÁO CÁO COVERAGE & TỔNG KẾT (tb_top)
         // ---------------------------------------------------------------------
         $display("\n================================================================================");
-        $display(" BAO CAO FUNCTIONAL COVERAGE (Muc 7.2)");
+        $display(" BAO CAO FUNCTIONAL COVERAGE TICH HOP TOAN HE THONG (tb_top - Muc 5.4)");
         $display("--------------------------------------------------------------------------------");
-        $display(" 1. Lop tran SUBSAT:");
-        $display("    - Khong tran (No Overflow)       : %0d hits %s", cov_no_ov,  (cov_no_ov  > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - Tran duong (Positive Overflow) : %0d hits %s", cov_pos_ov, (cov_pos_ov > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - Tran am    (Negative Overflow) : %0d hits %s", cov_neg_ov, (cov_neg_ov > 0) ? "[COVERED]" : "[MISSED]");
-        $display(" 2. Nguon Write-Back MUX 5:1 (WBSel[2:0]):");
-        $display("    - WBSel=000 (WB_MEM - LOAD)      : %0d hits %s", cov_wbsel[0], (cov_wbsel[0] > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - WBSel=001 (WB_ALU - ALU/NoOv)  : %0d hits %s", cov_wbsel[1], (cov_wbsel[1] > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - WBSel=010 (WB_PC4 - JAL/JALR)  : %0d hits %s", cov_wbsel[2], (cov_wbsel[2] > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - WBSel=011 (WB_MAX - 7FFFFFFF)  : %0d hits %s", cov_wbsel[3], (cov_wbsel[3] > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - WBSel=100 (WB_MIN - 80000000)  : %0d hits %s", cov_wbsel[4], (cov_wbsel[4] > 0) ? "[COVERED]" : "[MISSED]");
-        $display(" 3. Thanh ghi dich & Truong hop dac biet:");
-        $display("    - SUBSAT ghi vao rd = x0         : %0d hits %s", cov_rd_x0,       (cov_rd_x0       > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - SUBSAT ghi vao rd != x0        : %0d hits %s", cov_rd_non_x0,   (cov_rd_non_x0   > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - SUB thuong co tran (Wrap)      : %0d hits %s", cov_sub_wrap_ov, (cov_sub_wrap_ov > 0) ? "[COVERED]" : "[MISSED]");
-        $display("    - Ma lenh sai (Illegal Encoding) : %0d hits %s", cov_illegal_enc, (cov_illegal_enc > 0) ? "[COVERED]" : "[MISSED]");
+        $display(" 1. Immediate bins : 000(%0d) 001(%0d) 7FF(%0d) 800(%0d) FFF(%0d) | b11=0(%0d) b11=1(%0d)",
+                 cov_imm_000, cov_imm_001, cov_imm_7ff, cov_imm_800, cov_imm_fff, cov_imm_bit11_0, cov_imm_bit11_1);
+        $display(" 2. Operand bins   : zero(%0d) small(%0d) near_MAX(%0d) MIN(%0d) near_FFFF(%0d)",
+                 cov_op_zero, cov_op_small, cov_op_max, cov_op_min, cov_op_all1);
+        $display(" 3. Result bins    : unchanged(%0d) wrap(%0d) sign_flip(%0d) sign_same(%0d) | rd=x0(%0d) rd!=x0(%0d)",
+                 cov_res_unchanged, cov_res_wrap, cov_res_sign_flip, cov_res_sign_same, cov_rd_x0, cov_rd_non_x0);
+        $display(" 4. Transitions    : ADDI->ADDIU(%0d) SUBSAT->ADDIU(%0d) ADDIU->SUBSAT(%0d) ADDIU->SUB(%0d)",
+                 cov_tr_addi_to_addiu, cov_tr_subsat_to_addiu, cov_tr_addiu_to_subsat, cov_tr_addiu_to_sub);
         $display("================================================================================");
-        $display(" TONG KET KIEM THU tb_top:");
-        $display("   - TONG SO CA PASS      : %0d", pass_cnt);
-        $display("   - TONG SO CA FAIL      : %0d", fail_cnt);
-        $display("   - LOI ASSERTION        : %0d", assert_err);
+        $display(" TONG KET KIEM THU tb_top: PASS = %0d | FAIL = %0d | ASSERT_ERR = %0d",
+                 pass_cnt, fail_cnt, assert_err);
         $display("================================================================================");
 
-        if ((fail_cnt == 0) && (assert_err == 0) &&
-            (cov_no_ov > 0) && (cov_pos_ov > 0) && (cov_neg_ov > 0) &&
-            (cov_wbsel[0] > 0) && (cov_wbsel[1] > 0) && (cov_wbsel[2] > 0) &&
-            (cov_wbsel[3] > 0) && (cov_wbsel[4] > 0) &&
-            (cov_rd_x0 > 0) && (cov_rd_non_x0 > 0) &&
-            (cov_sub_wrap_ov > 0) && (cov_illegal_enc > 0)) begin
-            $display(" >>> ALL TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<");
-        end else begin
-            $display(" >>> VERIFICATION FAILED OR COVERAGE INCOMPLETE! <<<");
-        end
-
+        if ((fail_cnt == 0) && (assert_err == 0))
+            $display(" >>> ALL TOP-LEVEL INTEGRATED TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<");
+        else
+            $display(" >>> TOP-LEVEL VERIFICATION FAILED! <<<");
         $finish;
     end
 

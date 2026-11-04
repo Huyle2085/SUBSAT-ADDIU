@@ -1,0 +1,51 @@
+================================================================================
+ BAT DAU KIEM THU HE THONG: RV32I + SUBSAT (tb_subsat)
+ Opcode SUBSAT = 7'b0001011 (custom-0), funct3 = 3'b000, funct7 = 7'b0100001
+ Vi du ma may SUBSAT x5, x6, x7 = 0x4273028b
+================================================================================
+
+--- [PHAN A] 14 CA KIEM THU DIRECTED BAT BUOC (T01..T14) ---
+[PASS] T01_NoOv_50_20         | A=00000032 B=00000014 -> rd(x5)=0000001e | PosOv=0 NegOv=0 WBSel=1
+[PASS] T02_PosOv_MAX_m1       | A=7fffffff B=ffffffff -> rd(x5)=7fffffff | PosOv=1 NegOv=0 WBSel=3
+[PASS] T03_NegOv_MIN_p1       | A=80000000 B=00000001 -> rd(x5)=80000000 | PosOv=0 NegOv=1 WBSel=4
+[PASS] T04_Edge_MAX_0         | A=7fffffff B=00000000 -> rd(x5)=7fffffff | PosOv=0 NegOv=0 WBSel=1
+[PASS] T05_Edge_MIN_0         | A=80000000 B=00000000 -> rd(x5)=80000000 | PosOv=0 NegOv=0 WBSel=1
+[PASS] T06_NoOv_0_1           | A=00000000 B=00000001 -> rd(x5)=ffffffff | PosOv=0 NegOv=0 WBSel=1
+[PASS] T07_BothNeg_m2_m1      | A=fffffffe B=ffffffff -> rd(x5)=ffffffff | PosOv=0 NegOv=0 WBSel=1
+[PASS] T08_PosOv_0_MIN        | A=00000000 B=80000000 -> rd(x5)=7fffffff | PosOv=1 NegOv=0 WBSel=3
+[PASS] T09_NegOv_MIN_MAX      | A=80000000 B=7fffffff -> rd(x5)=80000000 | PosOv=0 NegOv=1 WBSel=4
+[PASS] T10_BothNeg_Eq         | A=ffffffff B=ffffffff -> rd(x5)=00000000 | PosOv=0 NegOv=0 WBSel=1
+[PASS] T11_SUB_WrapAround     | SUB x8, x6, x7 (7FFFFFFF - FFFFFFFF) -> x8=80000000 (wrap)
+[PASS] T12a_rd_x0_PosOv       | A=7fffffff B=ffffffff -> rd(x0)=00000000 | PosOv=1 NegOv=0 WBSel=3
+[PASS] T12b_rd_x0_NegOv       | A=80000000 B=00000001 -> rd(x0)=00000000 | PosOv=0 NegOv=1 WBSel=4
+[PASS] T12c_rd_x0_NoOv        | A=00000032 B=00000014 -> rd(x0)=00000000 | PosOv=0 NegOv=0 WBSel=1
+[PASS] T13_Other_Instructions | ADD/SW/LW(WB_MEM)/JAL(WB_PC4)/LUI hoat dong chinh xac
+[PASS] T14_Invalid_Encoding   | Cac ma lenh sai bi tu choi, x20 giu nguyen 0xCAFEBABE
+
+--- [PHAN B] RANDOM TESTS (1000 VECTOR NGAU NHIEN CO BIAS) ---
+
+================================================================================
+ BAO CAO FUNCTIONAL COVERAGE CHO SUBSAT (tb_subsat - Muc 7.2)
+--------------------------------------------------------------------------------
+ 1. Lop tran SUBSAT:
+    - Khong tran (No Overflow)       : 715 hits [COVERED]
+    - Tran duong (Positive Overflow) : 169 hits [COVERED]
+    - Tran am    (Negative Overflow) : 129 hits [COVERED]
+ 2. Nguon Write-Back MUX 5:1 (WBSel[2:0]):
+    - WBSel=000 (WB_MEM - LOAD)      : 1 hits [COVERED]
+    - WBSel=001 (WB_ALU - ALU/NoOv)  : 724 hits [COVERED]
+    - WBSel=010 (WB_PC4 - JAL/JALR)  : 1 hits [COVERED]
+    - WBSel=011 (WB_MAX - 7FFFFFFF)  : 169 hits [COVERED]
+    - WBSel=100 (WB_MIN - 80000000)  : 129 hits [COVERED]
+ 3. Thanh ghi dich & Truong hop dac biet:
+    - SUBSAT ghi vao rd = x0         : 34 hits [COVERED]
+    - SUBSAT ghi vao rd != x0        : 979 hits [COVERED]
+    - SUB thuong co tran (Wrap)      : 1 hits [COVERED]
+    - Ma lenh sai (Illegal Encoding) : 3 hits [COVERED]
+================================================================================
+ TONG KET KIEM THU tb_subsat:
+   - TONG SO CA PASS      : 1016
+   - TONG SO CA FAIL      : 0
+   - LOI ASSERTION        : 0
+================================================================================
+ >>> ALL SUBSAT TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<

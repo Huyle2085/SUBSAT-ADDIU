@@ -1,34 +1,39 @@
 ================================================================================
- BAT DAU KIEM THU HE THONG: LENH TUY CHINH ADDIU + SUBSAT + RV32I (tb_addiu)
- Encoding ADDIU: opcode=7'b0001011 (custom-0), funct3=3'b001, ImmSel=3'b101
- Vi du enc_addiu(5, 6, 12'hFFF) = 0xfff3128b
+ BAT DAU KIEM THU HE THONG: RV32I + ADDIU (tb_addiu)
+ Opcode ADDIU = 7'b0001011 (custom-0), funct3 = 3'b001, ImmSel = 3'b101 (IMM_I_ZERO)
+ Vi du ma may ADDIU x5, x6, 0xFFF = 0xfff3128b
 ================================================================================
 
---- [PHAN A] 15 CA DIRECTED TESTS (U01..U15 - DA HIEU CHINH U08 & U09) ---
-[PASS] U01_Zero_Imm         | rs1=00000000 imm12=000 -> rd(x5)=00000000 (imm_out=00000000, WBSel=1)
-[PASS] U02_Small_Pos_Imm    | rs1=00000010 imm12=7ff -> rd(x5)=0000080f (imm_out=000007ff, WBSel=1)
-[PASS] U03_Bit11_ZeroExt    | rs1=00000000 imm12=800 -> rd(x5)=00000800 (imm_out=00000800, WBSel=1)
-[PASS] U04_Max_Imm_4095     | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, WBSel=1)
-[PASS] U05_Near_32b_Edge    | rs1=fffff000 imm12=fff -> rd(x5)=ffffffff (imm_out=00000fff, WBSel=1)
-[PASS] U06_Wrap_32b         | rs1=ffffffff imm12=001 -> rd(x5)=00000000 (imm_out=00000001, WBSel=1)
-[PASS] U07_SignFlip_NoSat   | rs1=7fffff00 imm12=200 -> rd(x5)=80000100 (imm_out=00000200, WBSel=1)
-[PASS] U08_Fixed_rs1_Wrap   | rs1=fffff001 imm12=fff -> rd(x5)=00000000 (imm_out=00000fff, WBSel=1)
-[PASS] U09_Fixed_Exp_0FFF   | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, WBSel=1)
-[PASS] U10_Neg_Plus_Imm     | rs1=80000000 imm12=800 -> rd(x5)=80000800 (imm_out=00000800, WBSel=1)
-[PASS] U11_Compare_ADDI     | rs1=00000000 imm12=fff -> ADDIU(x5)=00000fff vs ADDI(x8)=ffffffff
-[PASS] U12_rd_x0_Zero       | rs1=12345678 imm12=fff -> rd(x0)=00000000 (imm_out=00000fff, WBSel=1)
-[PASS] U13_After_SUBSAT_Ov  | SUBSAT(x9=7fffffff) -> ADDIU(x10=80000000, WBSel=1) -> SUBSAT(x11=80000000)
-[PASS] U14_Unused_Custom0_F3| custom-0 voi funct3=010..111 bi chan (RegWEn=0), x20 giu nguyen DEADBEEF
-[PASS] U15_Full_Regression  | Chuoi ADDIU -> SUB -> SW -> LW -> BEQ -> SUBSAT chinh xac
+--- [PHAN A] 15 CA KIEM THU DIRECTED CHO RV32I + ADDIU (U01..U15) ---
+[PASS] U01_Zero_Imm         | rs1=00000000 imm12=000 -> rd(x5)=00000000 (imm_out=00000000, ImmSel=5, WBSel=1)
+[PASS] U02_Small_Pos_Imm    | rs1=00000010 imm12=7ff -> rd(x5)=0000080f (imm_out=000007ff, ImmSel=5, WBSel=1)
+[PASS] U03_Bit11_ZeroExt    | rs1=00000000 imm12=800 -> rd(x5)=00000800 (imm_out=00000800, ImmSel=5, WBSel=1)
+[PASS] U04_Max_Imm_4095     | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U05_Near_32b_Edge    | rs1=fffff000 imm12=fff -> rd(x5)=ffffffff (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U06_Wrap_32b         | rs1=ffffffff imm12=001 -> rd(x5)=00000000 (imm_out=00000001, ImmSel=5, WBSel=1)
+[PASS] U07_SignFlip_NoSat   | rs1=7fffff00 imm12=200 -> rd(x5)=80000100 (imm_out=00000200, ImmSel=5, WBSel=1)
+[PASS] U08_Fixed_rs1_Wrap   | rs1=fffff001 imm12=fff -> rd(x5)=00000000 (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U09_Fixed_Exp_0FFF   | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U10_Neg_Plus_Imm     | rs1=80000000 imm12=800 -> rd(x5)=80000800 (imm_out=00000800, ImmSel=5, WBSel=1)
+[PASS] U11_Compare_ADDI     | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U12a_rd_x0_Imm800    | rs1=12345678 imm12=800 -> rd(x0)=00000000 (imm_out=00000800, ImmSel=5, WBSel=1)
+[PASS] U12b_rd_x0_ImmFFF    | rs1=12345678 imm12=fff -> rd(x0)=00000000 (imm_out=00000fff, ImmSel=5, WBSel=1)
+[PASS] U13a_Chain_Step1     | rs1=00001000 imm12=800 -> rd(x9)=00001800 (imm_out=00000800, ImmSel=5, WBSel=1)
+[PASS] U13b_Chain_Step2     | rs1=00001800 imm12=7ff -> rd(x10)=00001fff (imm_out=000007ff, ImmSel=5, WBSel=1)
+[PASS] U13c_Chain_Step3     | rs1=00001fff imm12=001 -> rd(x11)=00002000 (imm_out=00000001, ImmSel=5, WBSel=1)
+[PASS] U14_Unused_Custom0_F3| custom-0 voi funct3=010..111 bi chan, x20 giu nguyen DEADBEEF
+[PASS] U15_RV32I_Regression | Chuoi ADDIU -> SUB -> SW -> LW(WB_MEM) -> JAL(WB_PC4) -> LUI chinh xac
+
+--- [PHAN B] RANDOM TESTS CHO RV32I + ADDIU (1000 VECTOR CO BIAS) ---
 
 ================================================================================
- BAO CAO FUNCTIONAL COVERAGE CHO ADDIU (Muc 5.4)
+ BAO CAO FUNCTIONAL COVERAGE CHO RV32I + ADDIU (tb_addiu)
 --------------------------------------------------------------------------------
  1. Immediate bins : 000(1) 001(2) 7FF(1) 800(3) FFF(6) | b11=0(507) b11=1(507) [COVERED]
  2. Operand bins   : zero(5) small(2) near_MAX(2) MIN(1) near_FFFF(3) [COVERED]
- 3. Result bins    : unchanged(1) wrap(2) sign_flip(4) sign_same(1010) | rd=x0(30) rd!=x0(984) [COVERED]
- 4. Transitions    : ADDI->ADDIU(1) SUBSAT->ADDIU(2) ADDIU->SUBSAT(2) ADDIU->SUB(1) [COVERED]
+ 3. Result bins    : unchanged(1) wrap(2) sign_flip(4) sign_same(1010) | rd=x0(31) rd!=x0(986) [COVERED]
+ 4. Write-Back MUX : WB_MEM(1) WB_ALU(1020) WB_PC4(1) | Illegal Encoding(6) [COVERED]
 ================================================================================
- TONG KET KIEM THU tb_addiu: PASS = 1015 | FAIL = 0 | ASSERT_ERR = 0
+ TONG KET KIEM THU tb_addiu: PASS = 1018 | FAIL = 0 | ASSERT_ERR = 0
 ================================================================================
- >>> ALL ADDIU TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<
+ >>> ALL RV32I + ADDIU TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<

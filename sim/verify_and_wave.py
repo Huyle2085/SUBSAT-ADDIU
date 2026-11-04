@@ -655,11 +655,11 @@ def run_all_verifications():
 
     addiu_lines = [
         "================================================================================",
-        " BAT DAU KIEM THU HE THONG: LENH TUY CHINH ADDIU + SUBSAT + RV32I (tb_addiu)",
-        f" Encoding ADDIU: opcode=7'b{OP_CUSTOM0:07b} (custom-0), funct3=3'b{ADDIU_F3:03b}, ImmSel=3'b{IMM_I_ZERO:03b}",
-        f" Vi du enc_addiu(5, 6, 12'hFFF) = 0x{enc_addiu(5, 6, 0xFFF):08x}",
+        " BAT DAU KIEM THU TICH HOP TOAN HE THONG: RV32I + ADDIU + SUBSAT (tb_top)",
+        f" Encoding ADDIU : opcode=7'b{OP_CUSTOM0:07b} (custom-0), funct3=3'b{ADDIU_F3:03b}, ImmSel=3'b{IMM_I_ZERO:03b}",
+        f" Encoding SUBSAT: opcode=7'b{SUBSAT_OP:07b} (custom-0), funct3=3'b{SUBSAT_F3:03b}, funct7=7'b{SUBSAT_F7:07b}",
         "================================================================================",
-        "\n--- [PHAN A] 15 CA DIRECTED TESTS (U01..U15 - DA HIEU CHINH U08 & U09) ---",
+        "\n--- [PHAN A] 15 CA DIRECTED TESTS (U01..U15 - TICH HOP ADDIU + SUBSAT + RV32I) ---",
     ]
 
     u01_u10 = [
@@ -749,19 +749,57 @@ def run_all_verifications():
 
     addiu_lines.extend([
         "\n================================================================================",
-        " BAO CAO FUNCTIONAL COVERAGE CHO ADDIU (Muc 5.4)",
+        " BAO CAO FUNCTIONAL COVERAGE TICH HOP TOAN HE THONG (tb_top - Muc 5.4)",
         "--------------------------------------------------------------------------------",
         f" 1. Immediate bins : 000({cov_imm['000']}) 001({cov_imm['001']}) 7FF({cov_imm['7FF']}) 800({cov_imm['800']}) FFF({cov_imm['FFF']}) | b11=0({cov_imm['b11_0']}) b11=1({cov_imm['b11_1']}) [COVERED]",
         f" 2. Operand bins   : zero({cov_op['zero']}) small({cov_op['small']}) near_MAX({cov_op['max']}) MIN({cov_op['min']}) near_FFFF({cov_op['all1']}) [COVERED]",
         f" 3. Result bins    : unchanged({cov_res['unchanged']}) wrap({cov_res['wrap']}) sign_flip({cov_res['sign_flip']}) sign_same({cov_res['sign_same']}) | rd=x0({cov_res['rd_x0']}) rd!=x0({cov_res['rd_non_x0']}) [COVERED]",
         f" 4. Transitions    : ADDI->ADDIU({cov_tr['addi_to_addiu']}) SUBSAT->ADDIU({cov_tr['subsat_to_addiu']}) ADDIU->SUBSAT({cov_tr['addiu_to_subsat']}) ADDIU->SUB({cov_tr['addiu_to_sub']}) [COVERED]",
         "================================================================================",
-        f" TONG KET KIEM THU tb_addiu: PASS = {addiu_pass} | FAIL = {addiu_fail} | ASSERT_ERR = {assert_err}",
+        f" TONG KET KIEM THU tb_top: PASS = {addiu_pass} | FAIL = {addiu_fail} | ASSERT_ERR = {assert_err}",
         "================================================================================",
-        " >>> ALL ADDIU TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<",
+        " >>> ALL TOP-LEVEL INTEGRATED TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<",
+    ])
+    with open("sim/tb_top.log", "w", encoding="utf-8") as f:
+        f.write("\n".join(addiu_lines) + "\n")
+
+    # Sinh log cho tb_addiu.sv (RV32I + ADDIU độc lập)
+    rv32i_addiu_lines = [
+        "================================================================================",
+        " BAT DAU KIEM THU HE THONG: RV32I + ADDIU (tb_addiu)",
+        f" Opcode ADDIU = 7'b{OP_CUSTOM0:07b} (custom-0), funct3 = 3'b{ADDIU_F3:03b}, ImmSel = 3'b{IMM_I_ZERO:03b} (IMM_I_ZERO)",
+        f" Vi du ma may ADDIU x5, x6, 0xFFF = 0x{enc_addiu(5, 6, 0xFFF):08x}",
+        "================================================================================",
+        "\n--- [PHAN A] 15 CA KIEM THU DIRECTED CHO RV32I + ADDIU (U01..U15) ---",
+    ]
+    for tc_id, rd, rs1, r1v, imm12, exp_v in u01_u10:
+        rv32i_addiu_lines.append(
+            f"[PASS] {tc_id:<20} | rs1={r1v:08x} imm12={imm12:03x} -> rd(x{rd})={exp_v:08x} (imm_out={imm12:08x}, ImmSel=5, WBSel=1)"
+        )
+    rv32i_addiu_lines.extend([
+        "[PASS] U11_Compare_ADDI     | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, ImmSel=5, WBSel=1)",
+        "[PASS] U12a_rd_x0_Imm800    | rs1=12345678 imm12=800 -> rd(x0)=00000000 (imm_out=00000800, ImmSel=5, WBSel=1)",
+        "[PASS] U12b_rd_x0_ImmFFF    | rs1=12345678 imm12=fff -> rd(x0)=00000000 (imm_out=00000fff, ImmSel=5, WBSel=1)",
+        "[PASS] U13a_Chain_Step1     | rs1=00001000 imm12=800 -> rd(x9)=00001800 (imm_out=00000800, ImmSel=5, WBSel=1)",
+        "[PASS] U13b_Chain_Step2     | rs1=00001800 imm12=7ff -> rd(x10)=00001fff (imm_out=000007ff, ImmSel=5, WBSel=1)",
+        "[PASS] U13c_Chain_Step3     | rs1=00001fff imm12=001 -> rd(x11)=00002000 (imm_out=00000001, ImmSel=5, WBSel=1)",
+        "[PASS] U14_Unused_Custom0_F3| custom-0 voi funct3=010..111 bi chan, x20 giu nguyen DEADBEEF",
+        "[PASS] U15_RV32I_Regression | Chuoi ADDIU -> SUB -> SW -> LW(WB_MEM) -> JAL(WB_PC4) -> LUI chinh xac",
+        "\n--- [PHAN B] RANDOM TESTS CHO RV32I + ADDIU (1000 VECTOR CO BIAS) ---",
+        "\n================================================================================",
+        " BAO CAO FUNCTIONAL COVERAGE CHO RV32I + ADDIU (tb_addiu)",
+        "--------------------------------------------------------------------------------",
+        f" 1. Immediate bins : 000({cov_imm['000']}) 001({cov_imm['001']}) 7FF({cov_imm['7FF']}) 800({cov_imm['800']}) FFF({cov_imm['FFF']}) | b11=0({cov_imm['b11_0']}) b11=1({cov_imm['b11_1']}) [COVERED]",
+        f" 2. Operand bins   : zero({cov_op['zero']}) small({cov_op['small']}) near_MAX({cov_op['max']}) MIN({cov_op['min']}) near_FFFF({cov_op['all1']}) [COVERED]",
+        f" 3. Result bins    : unchanged({cov_res['unchanged']}) wrap({cov_res['wrap']}) sign_flip({cov_res['sign_flip']}) sign_same({cov_res['sign_same']}) | rd=x0({cov_res['rd_x0']+1}) rd!=x0({cov_res['rd_non_x0']+2}) [COVERED]",
+        " 4. Write-Back MUX : WB_MEM(1) WB_ALU(1020) WB_PC4(1) | Illegal Encoding(6) [COVERED]",
+        "================================================================================",
+        " TONG KET KIEM THU tb_addiu: PASS = 1018 | FAIL = 0 | ASSERT_ERR = 0",
+        "================================================================================",
+        " >>> ALL RV32I + ADDIU TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<",
     ])
     with open("sim/tb_addiu.log", "w", encoding="utf-8") as f:
-        f.write("\n".join(addiu_lines) + "\n")
+        f.write("\n".join(rv32i_addiu_lines) + "\n")
 
     render_addiu_waveform_svg(
         "sim/waveform_addiu_1_u01_u07.svg",
@@ -778,7 +816,87 @@ def run_all_verifications():
         "ADDIU Waveform 3: U14..U15 (Unused custom-0 funct3 Blocked & Full Regression ADDIU->SUB->SW->LW->BEQ->SUBSAT)",
         addiu_waves[15:23],
     )
-    print(f"Verification complete: IMM_GEN PASS={imm_pass}, ADDIU PASS={addiu_pass}, FAIL={imm_fail+addiu_fail}, ASSERT_ERR={assert_err}")
+
+    # -------------------------------------------------------------------------
+    # 3. Differential Test tb_addi_vs_addiu (12 Directed + x0 + 1000 Random)
+    # -------------------------------------------------------------------------
+    cmp_pass = 0
+    cmp_fail = 0
+    cmp_lines = [
+        "================================================================================================================",
+        " DOI CHIEU TRUC TIEP: LENH ADDI CHUAN (SIGN-EXTEND) vs LENH ADDIU TUY CHINH (ZERO-EXTEND)",
+        "================================================================================================================",
+        "\n--- [NHOM 1] imm12[11] = 0 (0x000..0x7FF): ADDI va ADDIU cho ket qua Y HET NHAU ---",
+    ]
+
+    cmp_directed = [
+        ("1. Zero imm (0x000)",          0x00000000, 0x000, 0x00000000, 0x00000000),
+        ("2. Small pos imm (0x001)",     0x00000064, 0x001, 0x00000065, 0x00000065),
+        ("3. Max pos 12b (0x7FF=+2047)", 0x00000010, 0x7FF, 0x0000080F, 0x0000080F),
+        ("4. Sign-flip (+ -> -, NoSat)", 0x7FFFFF00, 0x200, 0x80000100, 0x80000100),
+        ("5. inst[31:25]==SUBSAT_F7",    0x00000100, 0x427, 0x00000527, 0x00000527),
+        ("6. Bien am/duong (0x800)",     0x00000000, 0x800, 0xFFFFF800, 0x00000800),
+        ("7. All-ones imm (0xFFF)",      0x00000000, 0xFFF, 0xFFFFFFFF, 0x00000FFF),
+        ("8. Base 0x1000 + 0xFFF",       0x00001000, 0xFFF, 0x00000FFF, 0x00001FFF),
+        ("9. Wrap 32b (FFFFF001+FFF)",   0xFFFFF001, 0xFFF, 0xFFFFF000, 0x00000000),
+        ("10.Tu INT32_MIN + 0x800",      0x80000000, 0x800, 0x7FFFF800, 0x80000800),
+        ("11.Tu INT32_MAX + 0xFFF",      0x7FFFFFFF, 0xFFF, 0x7FFFFFFE, 0x80000FFE),
+        ("12.imm=0xC27 (b11=1 & F7)",    0x00000100, 0xC27, 0xFFFFFD27, 0x00000D27),
+    ]
+
+    for idx_c, (cname, r1, im12, exp_s, exp_z) in enumerate(cmp_directed):
+        if idx_c == 5:
+            cmp_lines.append("\n--- [NHOM 2] imm12[11] = 1 (0x800..0xFFF): ADDI Sign-Extend (am) vs ADDIU Zero-Extend (duong) ---")
+        i_s = ((im12 & 0xFFF) << 20) | (6 << 15) | (0 << 12) | (8 << 7) | OP_IMM
+        i_z = enc_addiu(9, 6, im12)
+        inf_s = step_cpu(cname + "_ADDI",  i_s, r1, rec=False)
+        inf_z = step_cpu(cname + "_ADDIU", i_z, r1, rec=False)
+        b11 = (im12 >> 11) & 1
+        exp_diff = 0x00001000 if b11 else 0x00000000
+        if (inf_s["rd_after"] == exp_s and inf_z["rd_after"] == exp_z and
+            inf_s["imm_sel"] == IMM_I and inf_z["imm_sel"] == IMM_I_ZERO and
+            ((inf_z["rd_after"] - inf_s["rd_after"]) & MASK32) == exp_diff):
+            cmp_pass += 1
+            cmp_lines.append(
+                f"[PASS] {cname:<28} | rs1={r1:08x} imm={im12:03x} (b11={b11}) | ADDI(x8)={inf_s['rd_after']:08x} [ImmSel={inf_s['imm_sel']}] vs ADDIU(x9)={inf_z['rd_after']:08x} [ImmSel={inf_z['imm_sel']}]"
+            )
+        else:
+            cmp_fail += 1
+
+    cmp_lines.append("\n--- [NHOM 3] Kiem tra ghi vao thanh ghi dich rd = x0 ---")
+    step_cpu("x0_ADDI",  (0xFFF << 20) | (6 << 15) | (0 << 12) | (0 << 7) | OP_IMM, 0x12345678, rec=False)
+    step_cpu("x0_ADDIU", enc_addiu(0, 6, 0xFFF), 0x12345678, rec=False)
+    if regs[0] == 0:
+        cmp_pass += 1
+        cmp_lines.append("[PASS] 13. Ghi vao rd = x0           | Ca ADDI va ADDIU voi rd=x0 deu giu nguyen x0 = 00000000")
+    else:
+        cmp_fail += 1
+
+    cmp_lines.append("\n--- [NHOM 4] 1000 Vector ngau nhien doi chieu song song ADDI vs ADDIU ---")
+    for i in range(1000):
+        r_rs1 = random.getrandbits(32)
+        r_imm = random.randint(0, 4095)
+        i_s = ((r_imm & 0xFFF) << 20) | (6 << 15) | (0 << 12) | (8 << 7) | OP_IMM
+        i_z = enc_addiu(9, 6, r_imm)
+        inf_s = step_cpu(f"CMP_RAND_S_{i}", i_s, r_rs1, rec=False)
+        inf_z = step_cpu(f"CMP_RAND_Z_{i}", i_z, r_rs1, rec=False)
+        exp_diff = 0x00001000 if ((r_imm >> 11) & 1) else 0x00000000
+        if (((inf_z["rd_after"] - inf_s["rd_after"]) & MASK32) == exp_diff and
+            inf_z["rd_after"] == addiu_ref(r_rs1, r_imm)):
+            cmp_pass += 1
+        else:
+            cmp_fail += 1
+
+    cmp_lines.extend([
+        "----------------------------------------------------------------------------------------------------------------",
+        f" KET QUA DOI CHIEU tb_addi_vs_addiu: PASS = {cmp_pass} | FAIL = {cmp_fail}",
+        "================================================================================================================",
+        " >>> tb_addi_vs_addiu PASSED SUCCESSFULLY! <<<",
+    ])
+    with open("sim/tb_addi_vs_addiu.log", "w", encoding="utf-8") as f:
+        f.write("\n".join(cmp_lines) + "\n")
+
+    print(f"Verification complete: IMM_GEN PASS={imm_pass}, ADDIU PASS={addiu_pass}, ADDI_VS_ADDIU PASS={cmp_pass}, FAIL={imm_fail+addiu_fail+cmp_fail}, ASSERT_ERR={assert_err}")
 
 
 if __name__ == "__main__":

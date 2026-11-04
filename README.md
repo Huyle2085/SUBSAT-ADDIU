@@ -22,7 +22,7 @@ Dự án thiết kế RTL và kiểm thử (Verification) hai lệnh mở rộng
 
 ---
 
-## 2. Xác nhận độ rộng và cách nối dây 
+## 2. Xác nhận độ rộng và cách nối dây (Theo Góp ý 2)
 
 | Module | Nội dung xác nhận | Trạng thái trong RTL |
 |---|---|---|
@@ -30,7 +30,7 @@ Dự án thiết kế RTL và kiểm thử (Verification) hai lệnh mở rộng
 | [control_logic.sv](rtl/control_logic.sv) | Có xuất đúng `ImmSel[2:0]` và tách biệt `is_addiu` / `is_subsat` không? | **ĐÃ ĐẢM BẢO**: Cổng `output imm_sel_e imm_sel` rộng 3-bit; khi `is_addiu = 1` xuất `imm_sel = IMM_I_ZERO (3'b101)`, `b_sel = 1'b1`, `alu_sel = ALU_ADD`, `wb_sel = WB_ALU (3'b001)`. |
 | [imm_gen.sv](rtl/imm_gen.sv) | Input instruction là 32-bit hay chỉ `inst[31:7]`? | **ĐÃ ĐẢM BẢO**: Cổng `input logic [31:0] inst` nhận đủ 32-bit, do đó nhánh `IMM_I_ZERO` trích xuất trực tiếp `{20'b0, inst[31:20]}`. |
 | [datapath.sv](rtl/datapath.sv) | Đã nối đầy đủ 3-bit `ImmSel` và `WBSel` chưa? | **ĐÃ ĐẢM BẢO**: `input imm_sel_e imm_sel` (3-bit) nối thẳng vào `u_imm_gen`, `input wb_sel_e wb_sel` (3-bit) điều khiển MUX 5:1. |
-| [top.sv](rtl/top.sv) | Các kết nối có thống nhất độ rộng không? | **ĐÃ ĐẢM BẢO**: Kiểm tra bằng `vlog -sv -lint` báo **`Errors: 0, Warnings: 0`** trên toàn bộ 10 file RTL và 6 Testbench. |
+| [top.sv](rtl/top.sv) | Các kết nối có thống nhất độ rộng không? | **ĐÃ ĐẢM BẢO**: Kiểm tra bằng `vlog -sv -lint` báo **`Errors: 0, Warnings: 0`** trên toàn bộ 10 file RTL và 8 Testbench. |
 
 ---
 
@@ -53,12 +53,44 @@ BTN_CTMT/
 │   ├── tb_alu.sv           # Unit testbench cho ALU (Directed + 1000 Random)
 │   ├── tb_imm_gen.sv       # Unit testbench cho ImmGen (Quét vét cạn 4096 giá trị imm12)
 │   ├── tb_control.sv       # Unit testbench cho Control Logic (SUBSAT + ADDIU + Illegal)
-│   ├── tb_top.sv           # System testbench cho SUBSAT (T01..T14 + 1000 Random + Coverage)
-│   ├── tb_addiu.sv         # System testbench cho ADDIU (U01..U15 + 1000 Random + Coverage)
-│   └── tb_sub_vs_subsat.sv # Testbench đối chiếu trực tiếp SUB vs SUBSAT
+│   ├── tb_subsat.sv        # System testbench cho RV32I + SUBSAT (T01..T14 + 1000 Random + Coverage)
+│   ├── tb_addiu.sv         # System testbench cho RV32I + ADDIU (U01..U15 + 1000 Random + Coverage)
+│   ├── tb_top.sv           # System testbench tích hợp toàn hệ thống RV32I + ADDIU + SUBSAT
+│   ├── tb_sub_vs_subsat.sv # Testbench đối chiếu trực tiếp SUB vs SUBSAT
+│   └── tb_addi_vs_addiu.sv # Testbench đối chiếu trực tiếp ADDI vs ADDIU
 ├── sim/
-│   ├── run_all.do          # Script TCL chạy toàn bộ 6 testbench trên QuestaSim / ModelSim
+│   ├── run_all.do          # Script TCL chạy toàn bộ 8 testbench trên QuestaSim / ModelSim
 │   ├── verify_and_wave.py  # Script chạy mô phỏng chu kỳ, xuất log, VCD và SVG waveforms
 │   └── check_sub_regression.py # Công cụ đối chiếu nhanh SUB vs SUBSAT, ADDI vs ADDIU & RV32I
 └── README.md               # Tài liệu bàn giao dự án
 ```
+
+---
+
+## 4. Đánh giá Chi phí Phần cứng & Hiệu năng Bộ xử lý (Mục 8 & Mục 9)
+
+### 4.1. Chi phí tài nguyên phần cứng bổ sung (Hardware Overhead)
+- **Thanh ghi (Flip-Flops / Registers)**: **Tăng 0 FF** (cả hai lệnh `SUBSAT` và `ADDIU` đều thực thi hoàn toàn bằng mạch tổ hợp trong 1 chu kỳ, không làm tăng số thanh ghi trạng thái).
+- **Bộ cộng/trừ 32-bit (ALU Adder/Subtractor)**: **Tăng 0 bộ cộng** (tái sử dụng hoàn toàn bộ cộng `ALU_ADD` cho `ADDIU` và bộ trừ `ALU_SUB` cho `SUBSAT`).
+- **Logic tổ hợp (LUTs / Gates) tăng thêm rất nhỏ (~18–25 LUTs)**:
+  - `alu.sv`: 2 cổng tổ hợp 1-bit tính cờ tràn `pos_ov` và `neg_ov` từ bit dấu `a[31]`, `b[31]`, `sub_res[31]` (~2 LUTs).
+  - `imm_gen.sv`: Thêm nhánh `IMM_I_ZERO = 3'b101` nối dây `{20'b0, inst[31:20]}` (~12 LUTs cho MUX chọn 12-bit thấp và маски 20-bit cao).
+  - `control_logic.sv`: Giải mã `is_addiu`, `is_subsat` và điều khiển `imm_sel[2:0]`, `wb_sel[2:0]` (~6 LUTs).
+  - `datapath.sv`: Mở rộng Write-Back MUX từ 3:1 lên 5:1 với 2 ngõ vào hằng số `32'h7FFF_FFFF` và `32'h8000_0000`.
+
+### 4.2. Phân tích đường dữ liệu tới hạn (Critical Path Analysis)
+- **Đường tới hạn của CPU RV32I gốc (Lệnh `LW`)**:
+  $$T_{\text{LW}} = t_{\text{PC}} + t_{\text{IMEM}} + t_{\text{RF\_read}} + t_{\text{MUX2}} + t_{\text{ALU}} + t_{\text{DMEM}} + t_{\text{WBMUX}} + t_{\text{RF\_setup}}$$
+- **Đường dữ liệu của lệnh `ADDIU`**:
+  $$T_{\text{ADDIU}} = t_{\text{PC}} + t_{\text{IMEM}} + \max(t_{\text{RF\_read}}, t_{\text{Dec}} + t_{\text{ImmGen}}) + t_{\text{MUX2}} + t_{\text{ALU}} + t_{\text{WBMUX}} + t_{\text{RF\_setup}}$$
+  $\rightarrow$ Không truy cập `DMEM` ($t_{\text{DMEM}} = 0$), độ trễ tương đương lệnh `ADDI` chuẩn ($T_{\text{ADDIU}} < T_{\text{LW}}$).
+- **Đường dữ liệu của lệnh `SUBSAT`**:
+  $$T_{\text{SUBSAT}} = t_{\text{PC}} + t_{\text{IMEM}} + t_{\text{RF\_read}} + t_{\text{MUX2}} + t_{\text{ALU}} + (t_{\text{Ov}} + t_{\text{WBSel\_ov}}) + t_{\text{WBMUX}} + t_{\text{RF\_setup}}$$
+  $\rightarrow$ So với `SUB` chuẩn, chỉ tăng thêm độ trễ của 1 cổng tính cờ tràn $t_{\text{Ov}}$ và cổng chọn `wb_sel` $t_{\text{WBSel\_ov}}$ ($\approx 0.3\text{ – }0.4\text{ ns}$), vẫn nhỏ hơn độ trễ đọc bộ nhớ dữ liệu $t_{\text{DMEM}}$ của lệnh `LW` ($T_{\text{SUBSAT}} < T_{\text{LW}}$).
+
+### 4.3. Ảnh hưởng đến hiệu năng tổng thể (Performance Impact)
+- **Tần số xung nhịp tối đa ($F_{\max}$)**: Hầu như không đổi (trên testbench hệ thống vận hành ổn định tại $T_{\text{clk}} = 10\text{ ns} \Leftrightarrow F = 100\text{ MHz}$).
+- **Tăng tốc thực thi chương trình ($\text{CPI} = 1$)**:
+  - **Với `SUBSAT`**: Thay thế chuỗi **6 – 8 lệnh RV32I chuẩn** (trừ, kiểm tra dấu toán hạng, kiểm tra dấu kết quả, rẽ nhánh và nạp hằng số bão hòa `0x7FFFFFFF`/`0x80000000`) chỉ bằng **1 lệnh duy nhất (1 chu kỳ)** $\rightarrow$ **Tăng tốc 6 – 8 lần** cho các tác vụ DSP/xử lý ảnh/âm thanh.
+  - **Với `ADDIU`**: Thay thế chuỗi **2 – 3 lệnh RV32I chuẩn** khi cộng hằng số không dấu 12-bit trong dải `[2048..4095]` (`imm[11] = 1`, vốn bị `ADDI` chuẩn sign-extend thành số âm) chỉ bằng **1 lệnh duy nhất (1 chu kỳ)** $\rightarrow$ **Tăng tốc 2 – 3 lần** và giảm kích thước mã máy (Code Size).
+

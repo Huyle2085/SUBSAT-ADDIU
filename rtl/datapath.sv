@@ -26,7 +26,7 @@ module datapath
     input  logic        br_un,
     input  logic        a_sel,
     input  logic        b_sel,
-    input  alu_sel_e    alu_sel,
+    input  alu_sel_e    alu_sel,    
     input  wb_sel_e     wb_sel,
 
     // Cờ trạng thái gửi về Control Logic

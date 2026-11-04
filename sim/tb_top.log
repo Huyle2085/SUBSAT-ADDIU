@@ -1,51 +1,34 @@
 ================================================================================
- BAT DAU KIEM THU HE THONG: RV32I + SUBSAT (tb_top)
- Opcode SUBSAT = 7'b0001011 (custom-0), funct3 = 3'b000, funct7 = 7'b0100001
- Vi du ma may SUBSAT x5, x6, x7 = 0x4273028b
+ BAT DAU KIEM THU TICH HOP TOAN HE THONG: RV32I + ADDIU + SUBSAT (tb_top)
+ Encoding ADDIU : opcode=7'b0001011 (custom-0), funct3=3'b001, ImmSel=3'b101
+ Encoding SUBSAT: opcode=7'b0001011 (custom-0), funct3=3'b000, funct7=7'b0100001
 ================================================================================
 
---- [PHAN A] 14 CA KIEM THU DIRECTED BAT BUOC (T01..T14) ---
-[PASS] T01_NoOv_50_20         | A=00000032 B=00000014 -> rd(x5)=0000001e | PosOv=0 NegOv=0 WBSel=1
-[PASS] T02_PosOv_MAX_m1       | A=7fffffff B=ffffffff -> rd(x5)=7fffffff | PosOv=1 NegOv=0 WBSel=3
-[PASS] T03_NegOv_MIN_p1       | A=80000000 B=00000001 -> rd(x5)=80000000 | PosOv=0 NegOv=1 WBSel=4
-[PASS] T04_Edge_MAX_0         | A=7fffffff B=00000000 -> rd(x5)=7fffffff | PosOv=0 NegOv=0 WBSel=1
-[PASS] T05_Edge_MIN_0         | A=80000000 B=00000000 -> rd(x5)=80000000 | PosOv=0 NegOv=0 WBSel=1
-[PASS] T06_NoOv_0_1           | A=00000000 B=00000001 -> rd(x5)=ffffffff | PosOv=0 NegOv=0 WBSel=1
-[PASS] T07_BothNeg_m2_m1      | A=fffffffe B=ffffffff -> rd(x5)=ffffffff | PosOv=0 NegOv=0 WBSel=1
-[PASS] T08_PosOv_0_MIN        | A=00000000 B=80000000 -> rd(x5)=7fffffff | PosOv=1 NegOv=0 WBSel=3
-[PASS] T09_NegOv_MIN_MAX      | A=80000000 B=7fffffff -> rd(x5)=80000000 | PosOv=0 NegOv=1 WBSel=4
-[PASS] T10_BothNeg_Eq         | A=ffffffff B=ffffffff -> rd(x5)=00000000 | PosOv=0 NegOv=0 WBSel=1
-[PASS] T11_SUB_WrapAround     | SUB x8, x6, x7 (7FFFFFFF - FFFFFFFF) -> x8=80000000 (wrap)
-[PASS] T12a_rd_x0_PosOv       | A=7fffffff B=ffffffff -> rd(x0)=00000000 | PosOv=1 NegOv=0 WBSel=3
-[PASS] T12b_rd_x0_NegOv       | A=80000000 B=00000001 -> rd(x0)=00000000 | PosOv=0 NegOv=1 WBSel=4
-[PASS] T12c_rd_x0_NoOv        | A=00000032 B=00000014 -> rd(x0)=00000000 | PosOv=0 NegOv=0 WBSel=1
-[PASS] T13_Other_Instructions | ADD/SW/LW(WB_MEM)/JAL(WB_PC4)/LUI hoat dong chinh xac
-[PASS] T14_Invalid_Encoding   | Cac ma lenh sai bi tu choi, x20 giu nguyen 0xCAFEBABE
-
---- [PHAN B] RANDOM TESTS (1000 VECTOR NGAU NHIEN CO BIAS) ---
+--- [PHAN A] 15 CA DIRECTED TESTS (U01..U15 - TICH HOP ADDIU + SUBSAT + RV32I) ---
+[PASS] U01_Zero_Imm         | rs1=00000000 imm12=000 -> rd(x5)=00000000 (imm_out=00000000, WBSel=1)
+[PASS] U02_Small_Pos_Imm    | rs1=00000010 imm12=7ff -> rd(x5)=0000080f (imm_out=000007ff, WBSel=1)
+[PASS] U03_Bit11_ZeroExt    | rs1=00000000 imm12=800 -> rd(x5)=00000800 (imm_out=00000800, WBSel=1)
+[PASS] U04_Max_Imm_4095     | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, WBSel=1)
+[PASS] U05_Near_32b_Edge    | rs1=fffff000 imm12=fff -> rd(x5)=ffffffff (imm_out=00000fff, WBSel=1)
+[PASS] U06_Wrap_32b         | rs1=ffffffff imm12=001 -> rd(x5)=00000000 (imm_out=00000001, WBSel=1)
+[PASS] U07_SignFlip_NoSat   | rs1=7fffff00 imm12=200 -> rd(x5)=80000100 (imm_out=00000200, WBSel=1)
+[PASS] U08_Fixed_rs1_Wrap   | rs1=fffff001 imm12=fff -> rd(x5)=00000000 (imm_out=00000fff, WBSel=1)
+[PASS] U09_Fixed_Exp_0FFF   | rs1=00000000 imm12=fff -> rd(x5)=00000fff (imm_out=00000fff, WBSel=1)
+[PASS] U10_Neg_Plus_Imm     | rs1=80000000 imm12=800 -> rd(x5)=80000800 (imm_out=00000800, WBSel=1)
+[PASS] U11_Compare_ADDI     | rs1=00000000 imm12=fff -> ADDIU(x5)=00000fff vs ADDI(x8)=ffffffff
+[PASS] U12_rd_x0_Zero       | rs1=12345678 imm12=fff -> rd(x0)=00000000 (imm_out=00000fff, WBSel=1)
+[PASS] U13_After_SUBSAT_Ov  | SUBSAT(x9=7fffffff) -> ADDIU(x10=80000000, WBSel=1) -> SUBSAT(x11=80000000)
+[PASS] U14_Unused_Custom0_F3| custom-0 voi funct3=010..111 bi chan (RegWEn=0), x20 giu nguyen DEADBEEF
+[PASS] U15_Full_Regression  | Chuoi ADDIU -> SUB -> SW -> LW -> BEQ -> SUBSAT chinh xac
 
 ================================================================================
- BAO CAO FUNCTIONAL COVERAGE (Muc 7.2)
+ BAO CAO FUNCTIONAL COVERAGE TICH HOP TOAN HE THONG (tb_top - Muc 5.4)
 --------------------------------------------------------------------------------
- 1. Lop tran SUBSAT:
-    - Khong tran (No Overflow)       : 715 hits [COVERED]
-    - Tran duong (Positive Overflow) : 169 hits [COVERED]
-    - Tran am    (Negative Overflow) : 129 hits [COVERED]
- 2. Nguon Write-Back MUX 5:1 (WBSel[2:0]):
-    - WBSel=000 (WB_MEM - LOAD)      : 1 hits [COVERED]
-    - WBSel=001 (WB_ALU - ALU/NoOv)  : 724 hits [COVERED]
-    - WBSel=010 (WB_PC4 - JAL/JALR)  : 1 hits [COVERED]
-    - WBSel=011 (WB_MAX - 7FFFFFFF)  : 169 hits [COVERED]
-    - WBSel=100 (WB_MIN - 80000000)  : 129 hits [COVERED]
- 3. Thanh ghi dich & Truong hop dac biet:
-    - SUBSAT ghi vao rd = x0         : 34 hits [COVERED]
-    - SUBSAT ghi vao rd != x0        : 979 hits [COVERED]
-    - SUB thuong co tran (Wrap)      : 1 hits [COVERED]
-    - Ma lenh sai (Illegal Encoding) : 3 hits [COVERED]
+ 1. Immediate bins : 000(1) 001(2) 7FF(1) 800(3) FFF(6) | b11=0(507) b11=1(507) [COVERED]
+ 2. Operand bins   : zero(5) small(2) near_MAX(2) MIN(1) near_FFFF(3) [COVERED]
+ 3. Result bins    : unchanged(1) wrap(2) sign_flip(4) sign_same(1010) | rd=x0(30) rd!=x0(984) [COVERED]
+ 4. Transitions    : ADDI->ADDIU(1) SUBSAT->ADDIU(2) ADDIU->SUBSAT(2) ADDIU->SUB(1) [COVERED]
 ================================================================================
- TONG KET KIEM THU tb_top:
-   - TONG SO CA PASS      : 1016
-   - TONG SO CA FAIL      : 0
-   - LOI ASSERTION        : 0
+ TONG KET KIEM THU tb_top: PASS = 1015 | FAIL = 0 | ASSERT_ERR = 0
 ================================================================================
- >>> ALL TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<
+ >>> ALL TOP-LEVEL INTEGRATED TESTS & COVERAGE GOALS PASSED SUCCESSFULLY! <<<
